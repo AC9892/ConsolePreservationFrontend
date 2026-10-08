@@ -1,32 +1,42 @@
-# ConsolePreservation Framework (CPV)
+# ConsolePreservationFrontend (CPF)
 
-CPV is an experimental framework concept for preserving and reconstructing console environments, rather than only emulating game execution. This directory currently contains design documentation; no portable package format or restore tool is claimed to work.
+CPF is a proposed frontend for preserving and reconstructing console environments. This repository currently contains design documentation only. It does not contain a working application, preservation backend, or portable package format.
 
-## Purpose and core concept
+## Purpose
 
-Preservation records would describe console storage, firmware information, hardware profiles, configuration, metadata, saves, snapshots, and other reconstructable system state. Records should identify provenance and required external materials so a future restore tool can explain what it can and cannot reconstruct.
+Give users a way to inspect, organize, and eventually reconstruct the recorded state of a console environment, including context beyond a single game executable.
+
+## Core concept
+
+The frontend would present records for console storage, firmware information, hardware profiles, configuration, metadata, saves, snapshots, and other reconstructable state. It should distinguish captured data, descriptive metadata, and references to material the user must supply separately.
 
 ## Example use cases
 
-- Archive a console's configuration and save history for later research.
-- Recreate a documented hardware and software profile with compatible tools.
-- Transfer a preservation package between tools that support the same format.
+- Review an archived console configuration and save history.
+- Compare a preserved hardware or firmware profile with a target environment.
+- Prepare a preservation package for import by a compatible tool.
 
-These are proposed use cases, not implemented workflows.
+These are proposed workflows, not implemented features.
 
 ## High-level architecture
 
-A capture/import layer would collect permitted state and metadata. A versioned manifest would describe the environment and file integrity. An export/restore layer would supply compatible tools with the data they can consume. A future `.cpv` container format may bundle portable preservation packages, with optional adapters for existing emulators.
+CPF would be a user interface above a separate preservation data layer. The data layer would define manifests, provenance, integrity checks, and import/export behavior; CPF would display and validate those records and guide compatible restore workflows. Optional adapters could connect preservation records to existing emulators. A portable container format may be specified later; no container schema or extension is established by this repository.
 
-## Status and planned features
+## Current status
 
-**Status: experimental design.** The `.cpv` format, capture pipeline, and restore pipeline have not been specified or implemented here.
+**Experimental design.** This repository contains a README, not frontend code. Capture, import, export, package validation, and reconstruction are not available here.
 
-Planned work includes a manifest schema, integrity checks, storage and save capture, snapshot metadata, import/export adapters, and a documented container specification.
+## Planned features
+
+- Inspectable manifests for hardware, firmware information, configuration, and storage.
+- Save and snapshot browsing with provenance and integrity information.
+- Import/export and package validation interfaces.
+- Compatibility checks for optional emulator adapters.
+- Clear reporting of missing user-supplied materials during reconstruction.
 
 ## Relationship to the other frameworks
 
-CPV owns preservation records, not game translation, VM execution, or emulator runtime behavior. Optional integrations may exchange metadata or state with GameBridge, VMBridge (VME), EmuFrame, or existing emulators through adapters.
+CPF concerns console preservation workflows. [GameBridge](https://github.com/AC9892/GameBridge-Framework) concerns game-to-game translation, [VME/VMBridge](https://github.com/AC9892/VM-EmbedingFramework) concerns embedded virtual machines, and EmuFrame concerns emulator integration. Any connection would be optional and use explicit adapters or documented interfaces.
 
-CPV must not contain copyrighted firmware, games, keys, or other proprietary content. Users must supply any required material through lawful channels supported by the relevant tools.
+CPF must not include copyrighted firmware, games, keys, or other proprietary content. Users must supply any required material through lawful channels supported by the relevant tools.
 
