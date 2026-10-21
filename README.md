@@ -1,6 +1,6 @@
 # ConsolePreservationFrontend (CPF)
 
-CPF is a proposed frontend for preserving and reconstructing console environments. This repository currently contains design documentation only. It does not contain a working application, preservation backend, or portable package format.
+CPF is a proposed frontend for preserving and reconstructing console environments. The main branch carries the separate experimental Pseudo Game Mounter and its source. The DSi application is on the DSI branch.
 
 ## Purpose
 
@@ -24,7 +24,7 @@ CPF would be a user interface above a separate preservation data layer. The data
 
 ## Current status
 
-**Experimental design.** This repository contains a README, not frontend code. Capture, import, export, package validation, and reconstruction are not available here.
+**Alpha Pseudo Game Mounter build.** Download the Windows ZIP below. The Games tab is hidden in this version. The DSi app is published separately on the DSI branch.
 
 ## Planned features
 
@@ -40,3 +40,11 @@ CPF concerns console preservation workflows. [GameBridge](https://github.com/AC9
 
 CPF must not include copyrighted firmware, games, keys, or other proprietary content. Users must supply any required material through lawful channels supported by the relevant tools.
 
+
+
+## Downloads
+
+- `Pseudo-Game-Mounter-v0.1.0-alpha-win64.zip` — Windows application.
+- `Pseudo-Game-Mounter-v0.1.0-alpha-source.zip` — corresponding source.
+
+SHA-256 checksums are in `SHA256SUMS.txt`.
