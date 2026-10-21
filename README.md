@@ -30,7 +30,7 @@ CPF would be a user interface above a separate preservation data layer. The data
 
 - [Nintendo DSi target](https://github.com/AC9892/ConsolePreservationFrontend/tree/DSI) — DSi source, setup, and known limits.
 - [Pseudo Game Mounter](pseudo-game-mounter/README.md) — **required to play user-supplied `.nds` games with the current DSi build**. It mounts a cartridge in a running DSi session; games do not appear as installed DSi Menu tiles.
-
+Check [tree/DSI](https://github.com/AC9892/ConsolePreservationFrontend/tree/DSI#preview) for a preview.
 ## Planned features
 
 - Inspectable manifests for hardware, firmware information, configuration, and storage.
