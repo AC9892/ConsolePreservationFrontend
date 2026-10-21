@@ -1,2 +1,0 @@
-02b45eef3ef129d29c6c4128b726f9ca3c0cf75d8023c2d0709e1397aaa2b27d  CPF-DSi-v0.1.0-alpha-source.zip
-4f53377067ce3e091b4134efef7fbccd914c90785d9daeacf6db9a4f0f97003d  CPF-DSi-v0.1.0-alpha-win64.zip
