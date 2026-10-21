@@ -26,7 +26,7 @@ CPF reads and hashes the selected originals in place. It creates a separate writ
 - **F8:** DSi settings. Saving settings restarts the emulated DSi.
 - **F9:** adjust clickable button positions to match a custom shell image.
 - **Esc:** close the DSi window.
-- Keyboard controls are enabled by default. See [KEYBOARD.md](cpf-desktop/KEYBOARD.md) for remapping and [BUTTON_LAYOUT.md](cpf-desktop/BUTTON_LAYOUT.md) for button placement.
+- Keyboard controls are enabled by default. See [KEYBOARD.md](cpf-desktop/release/KEYBOARD.md) for remapping and [BUTTON_LAYOUT.md](cpf-desktop/release/BUTTON_LAYOUT.md) for button placement.
 
 The Windows package also includes setup and customization guides. Source is in [cpf-desktop](cpf-desktop), [melonds-ds-libretro](melonds-ds-libretro), and [melonDS-core](melonDS-core). `melonds-ds-libretro` is the adapter that connects the melonDS emulation core to CPF; it is not another app to launch. See [BUILD_CLEAN_RELEASE.md](BUILD_CLEAN_RELEASE.md) to build this source snapshot.
 
