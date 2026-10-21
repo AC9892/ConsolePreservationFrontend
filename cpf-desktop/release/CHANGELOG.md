@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.2
 
-- Limit automatic NAND, firmware, and SD snapshot history to the newest three per category. Keep manual snapshots and current storage, and log retired restore points. Requires an updated DSi Backend.exe; existing release ZIPs are unchanged. See [SNAPSHOTS.md](SNAPSHOTS.md).
+- Limit automatic NAND, firmware, and SD snapshot history to the newest three per category. Keep manual snapshots and current storage, and log retired restore points. Included in the alpha.2 backend. Older release ZIPs are unchanged. See [SNAPSHOTS.md](SNAPSHOTS.md).
 
 ## 0.1.0-alpha
 
