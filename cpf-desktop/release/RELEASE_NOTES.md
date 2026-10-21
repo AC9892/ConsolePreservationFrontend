@@ -1,6 +1,22 @@
-# CPF Nintendo DSi v0.1.0 Alpha
+# CPF Nintendo DSi v0.1.0-alpha.2
 
-This candidate adds a standalone `DSi.exe` first run importer to the existing Rust/Tauri DSi shell and C++ melonDS DS libretro runtime. It validates file sizes and a plain MBR or no$gba DSi footer, verifies SHA-256 copies, places private files in local app data, and starts the original DSi firmware from working copies. The development executable remains separate.
-Press F8 to change virtual SD settings, select a local custom shell image, or reload the user-editable keyboard map. Press F9 to align clickable buttons with the shell artwork. See CUSTOM_SHELL.md, BUTTON_LAYOUT.md, and KEYBOARD.md for instructions. This public candidate uses the matched compatibility backend; the alternate development backend is not included.
+This alpha update limits automatic snapshot history so repeated DSi sessions no longer retain an unlimited number of full NAND, firmware, and SD copies.
 
-CPF-owned code is GPL-3.0-only. This release candidate still needs clean environment validation and final dependency notice review. It is not approved for publication.
+## Changes
+
+- Keep the three newest automatic snapshots per category: NAND, firmware, and SD.
+- Apply retention before boot and after a successful shutdown, including cleanup after interrupted sessions.
+- Preserve manually named snapshots, original console dumps, capture metadata, save backups, and current working storage.
+- Log each retired snapshot and its rollback availability. Historical modification hashes remain intact.
+
+## Upgrading
+
+Use the complete alpha.2 package, including its updated `DSi Backend.exe`. Older automatic history is trimmed when that worker next starts. See [SNAPSHOTS.md](SNAPSHOTS.md) for the exact policy.
+
+Snapshots remain complete copies. Compression and changed-block snapshots are not implemented; SD history size depends on the SD image size.
+
+## Verification and limits
+
+Retention tests and release builds passed for the development worker and a clean public worker. Tests cover keeping the newest three snapshots, preserving manual snapshots and current storage, and recording pruning events. A complete live DSi compatibility regression has not been performed for this update. Existing application, audio, network, and clean-Windows limitations remain; see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+
+CPF-owned code is GPL-3.0-only. Third-party components retain their respective licenses. No Nintendo system data is included.
