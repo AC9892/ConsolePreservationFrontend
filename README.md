@@ -6,7 +6,7 @@ Experimental Windows build of CPF's Nintendo DSi target. It uses the C++ melonDS
 
 https://github.com/user-attachments/assets/7866c930-51d8-4763-a625-a48ba1d435c6
 
-Video is quite laggy
+[Video is quite laggy - change playback to 1.25 ](https://github.com/AC9892/ConsolePreservationFrontend/edit/DSI/README.md)
 
 ## Download and run
 
