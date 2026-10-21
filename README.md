@@ -45,3 +45,4 @@ CPF concerns console preservation workflows. [GameBridge](https://github.com/AC9
 
 CPF must not include copyrighted firmware, games, keys, or other proprietary content. Users must supply any required material through lawful channels supported by the relevant tools.
 
+This was made with GPT Sol 6.1
