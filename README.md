@@ -2,6 +2,10 @@
 
 Experimental Windows build of CPF's Nintendo DSi target. It uses the C++ melonDS emulation core through a libretro backend; the CPF desktop application and runtime worker are written in Rust, with a Tauri interface. The original DSi Menu comes from the user's own system files. The unfinished work to show library games as DSi Menu tiles is **not** in this public build.
 
+## Preview
+
+[Watch the DSi preview video](https://github.com/AC9892/ConsolePreservationFrontend/blob/main/image/preivew.mp4)
+
 ## Download and run
 
 For a first-time installation, use the complete Windows ZIP from [Releases](https://github.com/AC9892/ConsolePreservationFrontend/releases) when available. Extract the whole ZIP to a permanent folder, then run `DSi.exe`. Do not run it from inside the ZIP or download only the EXE: it also needs `DSi Backend.exe` beside it and `backend/melondsds_system_compat.dll` at that relative path. Windows x64 and WebView2 are required. This alpha is unsigned, so Windows may show **Unknown Publisher**.
