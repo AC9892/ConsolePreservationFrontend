@@ -11,6 +11,8 @@ https://github.com/user-attachments/assets/7866c930-51d8-4763-a625-a48ba1d435c6
 
 ## Download and run
 
+The alpha.2 update limits automatic NAND, firmware, and SD snapshot history to the newest three per category. Older automatic snapshots are trimmed when the updated backend next starts; manual snapshots and current storage are preserved. See the [snapshot policy](cpf-desktop/release/SNAPSHOTS.md) and [release notes](cpf-desktop/release/RELEASE_NOTES.md).
+
 For a first-time installation, use the complete Windows ZIP from [Releases](https://github.com/AC9892/ConsolePreservationFrontend/releases) when available. Extract the whole ZIP to a permanent folder, then run `DSi.exe`. Do not run it from inside the ZIP or download only the EXE: it also needs `DSi Backend.exe` beside it and `backend/melondsds_system_compat.dll` at that relative path. Windows x64 and WebView2 are required. This alpha is unsigned, so Windows may show **Unknown Publisher**.
 
 The setup window asks for files dumped from your own console:
