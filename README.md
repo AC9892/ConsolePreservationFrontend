@@ -29,7 +29,7 @@ CPF would be a user interface above a separate preservation data layer. The data
 **Experimental.** The DSi target and Pseudo Game Mounter are alpha projects. Their current capabilities and limits are documented separately; the framework-wide workflows above are not yet complete.
 
 - [Nintendo DSi target](https://github.com/AC9892/ConsolePreservationFrontend/tree/DSI) — DSi source, setup, and known limits.
-- [Pseudo Game Mounter](pseudo-game-mounter/README.md) — separate application for mounting a user-supplied `.nds` cartridge in a running DSi session.
+- [Pseudo Game Mounter](pseudo-game-mounter/README.md) — **required to play user-supplied `.nds` games with the current DSi build**. It mounts a cartridge in a running DSi session; games do not appear as installed DSi Menu tiles.
 
 ## Planned features
 
