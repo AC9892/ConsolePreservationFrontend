@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pseudo Game Mounter</title>
+  <style>
+    :root { color-scheme: dark; font: 13px "Segoe UI", Arial, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #e5e5e5; background: #282828; }
+    main { padding: 12px 16px; max-width: 480px; margin: auto; }
+    h1 { font-size: 17px; font-weight: 600; margin: 0 0 10px; }
+    h2 { font-size: 13px; font-weight: 600; margin: 0 0 7px; }
+    section { border-top: 1px solid #525252; padding: 10px 0; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > :first-child { flex: 1; min-width: 0; }
+    select { width: 100%; min-height: 32px; color: #eee; background: #3c3c3c; border: 1px solid #717171; border-radius: 3px; padding: 5px 8px; font: inherit; }
+    .value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9c9c9; }
+    .muted { color: #aaa; }
+    .game { display: flex; align-items: center; gap: 11px; min-height: 60px; }
+    .icon { width: 56px; height: 56px; flex: none; image-rendering: pixelated; border: 1px solid #555; background: #343434; }
+    .game-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    dl { display: grid; grid-template-columns: 82px 1fr; gap: 5px 8px; margin: 8px 0 0; }
+    dt { color: #aaa; } dd { margin: 0; overflow-wrap: anywhere; }
+    button { font: inherit; color: #eee; background: #454545; border: 1px solid #717171; border-radius: 3px; padding: 7px 10px; cursor: pointer; }
+    button:hover { background: #535353; } button:disabled { opacity: .45; cursor: default; }
+    button.primary { background: #425875; border-color: #7385a0; }
+    button.primary:hover { background: #506989; }
+    .actions { display: flex; gap: 7px; margin-top: 8px; }
+    .actions button { flex: 1; }
+    .status { line-height: 1.4; min-height: 34px; color: #d5d5d5; }
+    .error { color: #f2a09b; }
+    .hint { color: #aaa; font-size: 12px; line-height: 1.3; margin: 6px 0 0; }
+    #emulatorSection[hidden] { display: none; }
+    .tabs { display: flex; border-bottom: 1px solid #666; gap: 3px; margin-bottom: 4px; }
+    .tabs[hidden] { display: none; }
+    .tabs button { flex: 1; border-bottom: 0; border-radius: 3px 3px 0 0; }
+    .tabs button.active { background: #545454; color: #fff; }
+    .panel[hidden] { display: none; }
+    .library-list { max-height: 580px; overflow-y: auto; margin-top: 10px; border-top: 1px solid #525252; }
+    .library-item { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-bottom: 1px solid #484848; }
+    .library-item .details { min-width: 0; flex: 1; }
+    .library-item canvas { width: 40px; height: 40px; image-rendering: pixelated; }
+    .library-item button { flex: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Pseudo Game Mounter</h1>
+    <nav class="tabs" aria-label="Pseudo sections" hidden><button id="cartridgeTabButton" class="active">Cartridge</button><button id="gamesTabButton">Games</button></nav>
+    <div id="cartridgePanel" class="panel">
+    <section id="emulatorSection" hidden>
+      <h2>Emulator</h2>
+      <div class="row"><div id="emulator" class="value">No emulator selected</div><button id="chooseEmulator">Browse…</button></div>
+      <p class="hint">Nintendo DSi mode · Direct Boot off · your own BIOS, firmware, and NAND</p>
+      <button id="settings" style="margin-top:8px">Open melonDS settings</button>
+    </section>
+    <section>
+      <h2>Target app</h2>
+      <select id="sessionSelect" aria-label="Running console session"><option value="">No console app selected</option></select>
+      <p class="hint">Choose a running DSi, Development DSi, or melonDS session to inspect, eject, or insert a cartridge. Each session is identified by its process ID.</p>
+    </section>
+    <section>
+      <h2>Virtual cartridge</h2>
+      <div class="game">
+        <canvas id="icon" class="icon" width="32" height="32"></canvas>
+        <div style="min-width:0"><div id="title" class="game-title">No cartridge selected</div><div id="file" class="value muted">Choose an .nds image</div></div>
+      </div>
+      <dl><dt>Game code</dt><dd id="code">—</dd><dt>Format</dt><dd id="format">—</dd><dt>Size</dt><dd id="size">—</dd><dt>Source file</dt><dd id="sourcePath">—</dd></dl>
+      <div class="actions"><button id="chooseGame">Choose .nds</button><button class="primary" id="mount">Mount &amp; start</button></div>
+      <div class="actions"><button id="checkSlot">Check slot</button><button id="eject">Eject cartridge</button><button id="clearSelection">Clear selection</button></div>
+    </section>
+    <section>
+      <h2>Session</h2>
+      <dl><dt>Emulator</dt><dd id="running">Not running</dd><dt>Slot-1</dt><dd id="mounted">Empty</dd><dt>Mount status</dt><dd id="mountStatus">Empty</dd></dl>
+      <p id="status" class="status">Select a cartridge and a configured emulator.</p>
+        <p class="hint">Eject empties Slot-1. Choose a replacement after ejecting to insert it while the DSi stays running. Check slot reads melonDS only when you press it.</p>
+    </section>
+    </div>
+    <div id="gamesPanel" class="panel" hidden>
+      <section>
+        <h2>Game library</h2>
+        <p class="hint">Choose a folder or use the selected DSi's virtual SD. Pseudo adds an identifier file; drop your .nds games into that folder. The original DSi Menu still uses Slot-1 to start games.</p>
+        <label class="hint" for="librarySessionSelect">Target app</label>
+        <select id="librarySessionSelect" aria-label="Running console session for library game"><option value="">No console app selected</option></select>
+        <div class="row" style="margin-top:10px"><div id="libraryPath" class="value muted">No game library selected</div><button id="chooseLibrary">Choose folder…</button></div>
+        <div class="actions"><button id="useDsiSdLibrary">Use this DSi's SD</button></div>
+        <div class="actions"><button id="openLibrary">Open folder</button><button id="refreshLibrary">Refresh games</button></div>
+        <p class="hint">Files added to the DSi's virtual SD folder appear on the emulated SD after restarting the DSi. Select a game here to insert it into Slot-1 now.</p>
+        <p id="libraryStatus" class="status muted">Choose a folder to begin.</p>
+        <div id="libraryList" class="library-list"></div>
+      </section>
+    </div>
+  </main>
+  <script>
+    const invoke = window.__TAURI__.core.invoke;
+    const el = (id) => document.getElementById(id);
+    const fileName = (path) => path?.split(/[\\/]/).pop() || "";
+    let latestError = null;
+    let lastState = null;
+    let libraryListing = null;
+    let busy = false;
+    function tab(name) {
+      el("cartridgePanel").hidden = name !== "cartridge";
+      el("gamesPanel").hidden = name !== "games";
+      el("cartridgeTabButton").classList.toggle("active", name === "cartridge");
+      el("gamesTabButton").classList.toggle("active", name === "games");
+      if (name === "games") void refreshLibrary();
+    }
+    function showLibrary(listing) {
+      libraryListing = listing;
+      el("libraryPath").textContent = listing.folder || "No game library selected";
+      el("libraryPath").title = listing.folder || "";
+      el("openLibrary").disabled = !listing.folder;
+      const count = listing.games.length;
+      el("libraryStatus").textContent = !listing.folder ? "Choose a folder to begin." :
+        `${count} .nds game${count === 1 ? "" : "s"} found${listing.skipped ? ` · ${listing.skipped} unreadable file(s) skipped` : ""}.`;
+      const list = el("libraryList"); list.replaceChildren();
+      for (const game of listing.games) {
+        const row = document.createElement("div"); row.className = "library-item";
+        const icon = document.createElement("canvas"); icon.width = 32; icon.height = 32;
+        if (game.icon_rgba) icon.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(game.icon_rgba), 32, 32), 0, 0);
+        const details = document.createElement("div"); details.className = "details";
+        const title = document.createElement("div"); title.className = "game-title"; title.textContent = game.title;
+        const file = document.createElement("div"); file.className = "value muted"; file.textContent = `${fileName(game.path)} · ${game.game_code}`; file.title = game.path;
+        details.append(title, file);
+        const button = document.createElement("button");
+        const occupied = !!lastState?.running && lastState.slot_inserted !== false;
+        const sameGame = lastState?.slot_inserted === true && lastState.mounted_path?.toLowerCase() === game.path.toLowerCase();
+        const selected = !lastState?.running && lastState?.selected?.path?.toLowerCase() === game.path.toLowerCase();
+        button.textContent = sameGame ? "Mounted" : occupied ? "Eject first" : selected ? "Selected" : lastState?.running ? "Insert" : "Select";
+        button.disabled = occupied;
+        button.onclick = () => useLibraryGame(fileName(game.path));
+        row.append(icon, details, button); list.append(row);
+      }
+    }
+    async function refreshLibrary() {
+      try { showLibrary(await invoke("get_library")); }
+      catch (error) { el("libraryStatus").textContent = String(error); el("libraryStatus").classList.add("error"); }
+    }
+    async function useLibraryGame(fileNameValue) {
+      if (busy) return;
+      busy = true;
+      try {
+        latestError = null;
+        const state = await invoke("select_library_game", {fileName: fileNameValue});
+        show(state);
+        if (!state.running) tab("cartridge");
+        else el("libraryStatus").textContent = state.status;
+      } catch (error) { el("libraryStatus").textContent = String(error); el("libraryStatus").classList.add("error"); }
+      finally { busy = false; }
+    }
+    function show(state) {
+      lastState = state;
+      if (!el("gamesPanel").hidden && libraryListing) showLibrary(libraryListing);
+      el("emulatorSection").hidden = !state.show_melon_tools;
+      const choices = state.sessions || [];
+      for (const selector of [el("sessionSelect"), el("librarySessionSelect")]) {
+        selector.replaceChildren(new Option(choices.length ? "Select a running console app" : "No running console apps found", ""));
+        for (const session of choices) selector.add(new Option(`${session.title} · PID ${session.pid}`, String(session.pid)));
+        selector.value = state.selected_pid ? String(state.selected_pid) : "";
+      }
+      el("emulator").textContent = state.emulator
+        ? (state.packaged_backend ? "Packaged melonDS" : fileName(state.emulator))
+        : "No emulator selected";
+      el("emulator").title = state.emulator || "";
+      const game = state.selected;
+      const liveOnly = state.running && state.slot_inserted && !game;
+      el("title").textContent = game?.title || (liveOnly ? state.slot_label : "No cartridge selected");
+      el("file").textContent = game ? fileName(game.path) : (liveOnly ? `Inserted through ${state.session_label || "melonDS"}` : "Choose an .nds image");
+      el("file").title = game?.path || "";
+      el("code").textContent = game?.game_code || "—";
+      el("format").textContent = game?.format || "—";
+      el("size").textContent = game ? `${(game.size_bytes / 1048576).toFixed(1)} MiB` : "—";
+      el("sourcePath").textContent = game?.path || "—";
+      const canvas = el("icon"), context = canvas.getContext("2d");
+      context.clearRect(0, 0, 32, 32);
+      if (game?.icon_rgba) context.putImageData(new ImageData(new Uint8ClampedArray(game.icon_rgba), 32, 32), 0, 0);
+      el("running").textContent = state.running ? `${state.session_label || "melonDS"} · PID ${state.selected_pid}` : "Not running";
+      el("mounted").textContent = state.slot_label;
+      el("mountStatus").textContent = !state.running ? "Empty" :
+        state.slot_inserted === true ? "Confirmed in Slot-1" :
+        state.slot_inserted === false ? "Empty" : "Not verified — press Check slot";
+      el("status").textContent = latestError || (!state.running && choices.length === 0
+        ? "No console app detected. Start the current DSi.exe or Development_DSI.exe; older public DSi builds cannot connect to Pseudo."
+        : state.status);
+      el("status").classList.toggle("error", !!latestError);
+      el("mount").disabled = !state.emulator || !game || state.running || state.settings_open;
+      el("settings").disabled = !state.emulator || state.running || state.settings_open;
+      el("chooseGame").textContent = state.running ? "Insert .nds" : "Choose .nds";
+      el("chooseGame").disabled = state.running && state.slot_inserted !== false;
+      el("checkSlot").disabled = !state.running;
+      el("eject").disabled = !state.running || state.slot_inserted === false;
+      el("clearSelection").disabled = state.running || !game;
+      el("useDsiSdLibrary").disabled = !state.running || state.session_kind !== "dev_dsi";
+    }
+    async function call(command) {
+      if (busy && command !== "get_state") return;
+      if (command !== "get_state") busy = true;
+      if (command === "insert_cartridge") {
+        el("status").textContent = "Choose a replacement .nds to insert into the running DSi.";
+        el("status").classList.remove("error");
+      }
+      try {
+        const state = await invoke(command);
+        if (command !== "get_state") latestError = null;
+        show(state);
+      } catch (error) {
+        latestError = String(error);
+        el("status").textContent = latestError;
+        el("status").classList.add("error");
+      } finally {
+        if (command !== "get_state") busy = false;
+      }
+    }
+    el("chooseEmulator").onclick = () => call("choose_emulator");
+    async function changeSession(selector) {
+      const pid = Number(selector.value);
+      if (!pid || busy) return;
+      busy = true;
+      try { latestError = null; show(await invoke("select_session", { pid })); }
+      catch (error) { latestError = String(error); el("status").textContent = latestError; el("status").classList.add("error"); }
+      finally { busy = false; }
+    }
+    el("sessionSelect").onchange = () => changeSession(el("sessionSelect"));
+    el("librarySessionSelect").onchange = () => changeSession(el("librarySessionSelect"));
+    el("settings").onclick = () => call("open_emulator_settings");
+    el("chooseGame").onclick = () => call(lastState?.running ? "insert_cartridge" : "choose_game");
+    el("mount").onclick = () => call("mount");
+    el("checkSlot").onclick = () => call("check_slot");
+    el("eject").onclick = () => call("eject");
+    el("clearSelection").onclick = () => call("clear_selection");
+    el("cartridgeTabButton").onclick = () => tab("cartridge");
+    el("gamesTabButton").onclick = () => tab("games");
+    el("chooseLibrary").onclick = async () => {
+      if (busy) return; busy = true;
+      try { showLibrary(await invoke("choose_library")); el("libraryStatus").classList.remove("error"); }
+      catch (error) { el("libraryStatus").textContent = String(error); el("libraryStatus").classList.add("error"); }
+      finally { busy = false; }
+    };
+    el("useDsiSdLibrary").onclick = async () => {
+      if (busy) return; busy = true;
+      try { showLibrary(await invoke("use_dsi_sd_library")); el("libraryStatus").classList.remove("error"); }
+      catch (error) { el("libraryStatus").textContent = String(error); el("libraryStatus").classList.add("error"); }
+      finally { busy = false; }
+    };
+    el("openLibrary").onclick = async () => {
+      try { await invoke("open_library"); }
+      catch (error) { el("libraryStatus").textContent = String(error); el("libraryStatus").classList.add("error"); }
+    };
+    el("refreshLibrary").onclick = () => refreshLibrary();
+    call("get_state");
+    setInterval(() => { if (!document.hidden && !busy) call("get_state"); }, 2500);
+    setInterval(() => { if (!document.hidden && !el("gamesPanel").hidden && !busy) refreshLibrary(); }, 5000);
+  </script>
+</body>
+</html>
