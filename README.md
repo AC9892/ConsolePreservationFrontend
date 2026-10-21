@@ -1,5 +1,7 @@
 # ConsolePreservationFrontend (CPF)
 
+[![Status: Experimental](https://img.shields.io/badge/status-experimental-666666)](https://github.com/AC9892/ConsolePreservationFrontend#current-status) [![DSi: Alpha](https://img.shields.io/badge/DSi-alpha-426487)](https://github.com/AC9892/ConsolePreservationFrontend/tree/DSI) [![Pseudo Game Mounter: Alpha](https://img.shields.io/badge/Pseudo_Game_Mounter-alpha-426487)](https://github.com/AC9892/ConsolePreservationFrontend/tree/main/pseudo-game-mounter)
+
 CPF is an experimental framework for preserving and reconstructing console environments. This repository contains the framework overview and early console-specific tools. The full preservation workflow and portable package format are still in development.
 
 ## Purpose
