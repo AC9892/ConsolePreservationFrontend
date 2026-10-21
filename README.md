@@ -4,7 +4,9 @@ Experimental Windows build of CPF's Nintendo DSi target. It uses the C++ melonDS
 
 ## Preview
 
-[Watch the DSi preview video](https://github.com/AC9892/ConsolePreservationFrontend/blob/main/image/preivew.mp4)
+[![DSi preview; click to watch the video](https://raw.githubusercontent.com/AC9892/ConsolePreservationFrontend/main/image/preivew.gif)](https://github.com/AC9892/ConsolePreservationFrontend/blob/main/image/preivew.mp4)
+
+[Watch the full preview video](https://github.com/AC9892/ConsolePreservationFrontend/blob/main/image/preivew.mp4)
 
 ## Download and run
 
