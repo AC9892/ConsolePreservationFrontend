@@ -22,6 +22,12 @@ Source: [DSI branch](https://github.com/AC9892/ConsolePreservationFrontend/tree/
 | DSI-9 | **Confirmed in repository** | [MANIFEST.sha256](https://github.com/AC9892/ConsolePreservationFrontend/blob/DSI/MANIFEST.sha256) omits root `LICENSE`, root `README.md`, and `backend/melondsds_system_compat.dll`; it cannot verify the entire branch. Regenerate it for the intended scope or label the exclusions. |
 | DSI-10 | **Open verification** | The [third-party notices](https://github.com/AC9892/ConsolePreservationFrontend/blob/DSI/cpf-desktop/release/THIRD_PARTY_LICENSES.md) and packaged backend's matching source need a final release audit. The [release notes](https://github.com/AC9892/ConsolePreservationFrontend/blob/DSI/cpf-desktop/release/RELEASE_NOTES.md) still say the candidate was not approved for publication. |
 
+## Snapshot storage
+
+| ID | Status | Problem and fix |
+| --- | --- | --- |
+| DSI-11 | **Fixed in source; release update pending** | Automatic full NAND/firmware/SD snapshots previously had no retention limit and accumulated many gigabytes. The DSI branch now retains the newest three automatic snapshots per category, logs pruning, preserves manually named snapshots, and rejects linked snapshot directories. Development and clean public worker tests and release builds passed. A rebuilt public backend is staged locally; already downloaded release ZIPs remain affected. See [snapshot policy](https://github.com/AC9892/ConsolePreservationFrontend/blob/DSI/cpf-desktop/release/SNAPSHOTS.md). |
+
 ## Current scope
 
 The public build is an alpha, not a claim of full DSi compatibility. Games do not currently become tiles in the original DSi Menu; the separate Pseudo Game Mounter handles cartridges. Do not commit or bundle Nintendo BIOS, firmware, NAND, titles, games, saves, keys, or personal console data.
