@@ -30,6 +30,10 @@ CPF reads and hashes the selected originals in place. It creates a separate writ
 
 The Windows package also includes setup and customization guides. Source is in [cpf-desktop](cpf-desktop), [melonds-ds-libretro](melonds-ds-libretro), and [melonDS-core](melonDS-core). `melonds-ds-libretro` is the adapter that connects the melonDS emulation core to CPF; it is not another app to launch. See [BUILD_CLEAN_RELEASE.md](BUILD_CLEAN_RELEASE.md) to build this source snapshot.
 
+## Playing games right now
+
+To play a user-supplied `.nds` game with the current DSi build, use the separate [Pseudo Game Mounter](https://github.com/AC9892/ConsolePreservationFrontend/blob/main/pseudo-game-mounter/README.md). The DSi app does not currently add games as tiles to the original DSi Menu.
+
 ## Current limits
 
 This is an alpha, not a claim of full DSi compatibility. Built-in applications may freeze, white-screen, or return to the boot screen. DSi Sound has shown performance and audio problems. Network-dependent system features have not been fully tested. Virtual cartridge support is experimental; Pseudo Game Mounter is a separate application.
