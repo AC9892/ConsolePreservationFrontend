@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Console Manager</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="toolbar">
+        <div class="brand"><span id="brand-name">Console Manager</span></div>
+        <label class="machine-picker">Machine <select id="machine-select" aria-label="Machine"></select></label>
+        <span id="connection-state" class="connection-state">Loading machines…</span>
+      </header>
+      <nav class="tabs" aria-label="Machine sections">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="titles">NAND titles</button>
+        <button class="tab" data-tab="storage">Storage</button>
+        <button class="tab" data-tab="runtime">Runtime</button>
+        <button class="tab" data-tab="events">Events</button>
+        <button class="tab" data-tab="settings">Settings</button>
+      </nav>
+      <main>
+        <section id="overview" class="pane active"><div id="overview-content"></div></section>
+        <section id="titles" class="pane"><div id="titles-content"></div></section>
+        <section id="storage" class="pane"><div id="storage-content"></div></section>
+        <section id="runtime" class="pane"><div id="runtime-content"></div></section>
+        <section id="events" class="pane"><div id="events-content"></div></section>
+        <section id="settings" class="pane"><div id="settings-content"></div></section>
+      </main>
+      <footer class="footer"><span id="footer-machine">No machine selected</span><span>Desktop 0.1</span></footer>
+    </div>
+    <div id="dsi-shell" aria-label="CPF Nintendo DSi">
+      <img id="dsi-case" src="/public-shell.svg" alt="Dual-screen console shell" draggable="false" data-tauri-drag-region />
+      <canvas id="console-top" width="256" height="192" aria-label="Top screen"></canvas>
+      <canvas id="console-bottom" width="256" height="192" aria-label="Touch screen"></canvas>
+      <div id="dsi-screen-status" role="status">Starting DSi…</div>
+      <div id="button-layout-tools" hidden>
+        <span id="button-layout-message" role="status">Drag each button marker over its image.</span>
+        <button id="button-layout-save" type="button">Save</button>
+        <button id="button-layout-cancel" type="button">Cancel</button>
+        <button id="button-layout-defaults" type="button">Defaults</button>
+      </div>
+    </div>
+    <div id="public-setup" hidden>
+      <h1>Set up Nintendo DSi</h1>
+      <p>Import BIOS, firmware, and NAND dumped from your own console. CPF stores verified copies in your local app data and runs from a separate working NAND.</p>
+      <div class="setup-actions"><button id="setup-folder" type="button">Find files in a folder…</button><span id="setup-folder-result"></span></div>
+      <div id="setup-fields"></div>
+      <p id="setup-status" role="status">Select all six required files.</p>
+      <button id="setup-import" type="button">Import and start DSi</button>
+    </div>
+    <div id="dsi-settings" hidden role="dialog" aria-label="DSi settings">
+      <h2>DSi settings</h2>
+      <label><input id="dsi-setting-sd" type="checkbox" /> Virtual SD card</label>
+      <section class="shell-settings" aria-label="Console shell image">
+        <h3>Console shell</h3>
+        <p id="shell-image-status">Default shell</p>
+        <p>PNG, 512–4096 pixels per side, up to 4 MiB. A square 1254×1254 image aligns best.</p>
+        <button id="shell-image-choose" type="button">Choose image…</button><button id="shell-image-reset" type="button">Use default</button>
+      </section>
+      <section class="input-settings" aria-label="Keyboard bindings">
+        <h3>Keyboard</h3>
+        <p id="keyboard-config-status">Loading keyboard bindings…</p>
+        <p>Edit <code>%LOCALAPPDATA%\CPF\Nintendo DSi\input.json</code>, then reload the bindings. F5, F6, F8, F9, and Esc remain app controls.</p>
+        <button id="keyboard-config-reload" type="button">Reload bindings</button>
+      </section>
+      <section class="input-settings" aria-label="Shell button positions">
+        <h3>Button positions</h3>
+        <p>Drag the button markers to match your shell image. Press F9 to adjust them at any time.</p>
+        <button id="button-layout-adjust" type="button">Adjust buttons…</button>
+      </section>
+      <p>Press F8 to open or close settings. Saving restarts the emulated DSi.</p>
+      <p id="dsi-settings-status" role="status"></p>
+      <div><button id="dsi-settings-save" type="button">Save and restart</button><button id="dsi-settings-close" type="button">Close</button></div>
+    </div>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/entry.ts"></script>
+  </body>
+</html>
+

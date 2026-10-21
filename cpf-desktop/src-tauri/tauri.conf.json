@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Console Manager",
+  "version": "0.1.0",
+  "identifier": "org.consolepreservation.cpf",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "Console Manager",
+      "width": 1080,
+      "height": 750,
+      "minWidth": 800,
+      "minHeight": 570,
+      "transparent": true
+    }],
+    "security": { "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'" }
+  },
+  "bundle": { "active": false }
+}
+

@@ -1,0 +1,955 @@
+/*
+    Copyright 2023 Jesse Talavera-Greenberg
+
+    melonDS DS is free software: you can redistribute it and/or modify it under
+    the terms of the GNU General Public License as published by the Free
+    Software Foundation, either version 3 of the License, or (at your option)
+    any later version.
+
+    melonDS DS is distributed in the hope that it will be useful, but WITHOUT ANY
+    WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+    FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with melonDS DS. If not, see http://www.gnu.org/licenses/.
+*/
+
+
+#include "opengl.hpp"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <utility>
+
+#include <GPU_OpenGL.h>
+#include <GPU_Soft.h>
+#include <NDS.h>
+
+#include <gfx/gl_capabilities.h>
+#include <glsym/rglgen.h>
+#include <retro_assert.h>
+#include <embedded/melondsds_fragment_shader.h>
+#include <embedded/melondsds_vertex_shader.h>
+
+#include "../core/core.hpp"
+#include "exceptions.hpp"
+#include "format.hpp"
+#include "screenlayout.hpp"
+#include "tracy.hpp"
+
+using glm::ivec2;
+using glm::mat3;
+using glm::vec2;
+using glm::vec3;
+using std::array;
+using MelonDsDs::ScreenLayout;
+
+constexpr unsigned VERTEXES_PER_SCREEN = 6;
+
+// The OpenGL core-profile versions each of melonDS's OpenGL-based renderers needs, as (major, minor)
+constexpr std::pair<GLint, GLint> LEGACY_GL_VERSION {3, 2};
+constexpr std::pair<GLint, GLint> COMPUTE_GL_VERSION {4, 3};
+
+// How many shader storage buffer binding points melonDS's compute renderer uses
+// (see the "layout (std430, binding = N)" declarations in its GPU3D_Compute_shaders.h)
+constexpr GLuint COMPUTE_SSBO_BINDINGS = 8;
+
+// melonDS renders each screen into its own layer of a 2D array texture,
+// so the third texture coordinate selects the screen.
+constexpr float TOP_SCREEN_LAYER = 0.0f;
+constexpr float BOTTOM_SCREEN_LAYER = 1.0f;
+constexpr array TOP_SCREEN_TEXCOORDS {
+    vec3(0, 0, TOP_SCREEN_LAYER), // northwest
+    vec3(0, 1, TOP_SCREEN_LAYER), // southwest
+    vec3(1, 1, TOP_SCREEN_LAYER), // southeast
+    vec3(0, 0, TOP_SCREEN_LAYER), // northwest
+    vec3(1, 0, TOP_SCREEN_LAYER), // northeast
+    vec3(1, 1, TOP_SCREEN_LAYER), // southeast
+};
+constexpr array BOTTOM_SCREEN_TEXCOORDS {
+    vec3(0, 0, BOTTOM_SCREEN_LAYER), // northwest
+    vec3(0, 1, BOTTOM_SCREEN_LAYER), // southwest
+    vec3(1, 1, BOTTOM_SCREEN_LAYER), // southeast
+    vec3(0, 0, BOTTOM_SCREEN_LAYER), // northwest
+    vec3(1, 0, BOTTOM_SCREEN_LAYER), // northeast
+    vec3(1, 1, BOTTOM_SCREEN_LAYER), // southeast
+};
+
+constexpr array<unsigned, 18> GetPositionIndexes(MelonDsDs::ScreenLayout layout) noexcept {
+    array<unsigned, VERTEXES_PER_SCREEN> topPositionIndexes = {0, 3, 2, 0, 1, 2};
+    array<unsigned, VERTEXES_PER_SCREEN> bottomPositionIndexes = {4, 7, 6, 4, 5, 6};
+    array<unsigned, VERTEXES_PER_SCREEN> hybridPositionIndexes = {8, 11, 10, 8, 9, 10};
+    array<unsigned, VERTEXES_PER_SCREEN*3> indexes = {};
+
+    switch (layout) {
+        case ScreenLayout::TopBottom:
+        case ScreenLayout::TurnLeft:
+        case ScreenLayout::TurnRight:
+        case ScreenLayout::UpsideDown:
+        case ScreenLayout::LeftRight:
+        case ScreenLayout::LargescreenTop:
+        case ScreenLayout::FlippedLargescreenBottom:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                indexes[i] = topPositionIndexes[i];
+                indexes[i + VERTEXES_PER_SCREEN] = bottomPositionIndexes[i];
+            }
+            break;
+        case ScreenLayout::RightLeft:
+        case ScreenLayout::BottomTop:
+        case ScreenLayout::LargescreenBottom:
+        case ScreenLayout::FlippedLargescreenTop:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                indexes[i] = bottomPositionIndexes[i];
+                indexes[i + VERTEXES_PER_SCREEN] = topPositionIndexes[i];
+            }
+            break;
+        case ScreenLayout::TopOnly:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                indexes[i] = topPositionIndexes[i];
+            }
+            break;
+        case ScreenLayout::BottomOnly:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                indexes[i] = bottomPositionIndexes[i];
+            }
+            break;
+        case ScreenLayout::HybridTop:
+        case ScreenLayout::FlippedHybridTop:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                indexes[i] = hybridPositionIndexes[i];
+                indexes[i + VERTEXES_PER_SCREEN] = bottomPositionIndexes[i];
+                indexes[i + VERTEXES_PER_SCREEN*2] = topPositionIndexes[i];
+            }
+            break;
+        case ScreenLayout::HybridBottom:
+        case ScreenLayout::FlippedHybridBottom:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                indexes[i] = hybridPositionIndexes[i];
+                indexes[i + VERTEXES_PER_SCREEN] = topPositionIndexes[i];
+                indexes[i + VERTEXES_PER_SCREEN*2] = bottomPositionIndexes[i];
+            }
+            break;
+    }
+
+    return indexes;
+}
+
+constexpr unsigned GetVertexCount(ScreenLayout layout, MelonDsDs::HybridSideScreenDisplay hybridScreen) noexcept {
+    switch (layout) {
+        case ScreenLayout::TopOnly:
+        case ScreenLayout::BottomOnly:
+            return 6; // 1 screen, 2 triangles
+        case ScreenLayout::HybridTop:
+        case ScreenLayout::HybridBottom:
+        case ScreenLayout::FlippedHybridTop:
+        case ScreenLayout::FlippedHybridBottom:
+            if (hybridScreen == MelonDsDs::HybridSideScreenDisplay::Both)
+                return 18; // 3 screens, 6 triangles
+        [[fallthrough]];
+        default:
+            return 12; // 2 screens, 4 triangles
+    }
+}
+
+static const char* const SHADER_PROGRAM_NAME = "melonDS DS Shader Program";
+
+// Index of the uniform buffer binding point used by the screen shader's uConfig block
+constexpr GLuint SHADER_CONFIG_UBO_BINDING = 16; // TODO: Where does 16 come from? It's not a size.
+
+
+std::unique_ptr<MelonDsDs::OpenGLRenderState> MelonDsDs::OpenGLRenderState::New(RenderMode mode) noexcept {
+    ZoneScopedN(TracyFunction);
+    try {
+        return std::make_unique<OpenGLRenderState>(mode);
+    } catch (const opengl_not_initialized_exception& e) {
+        retro::debug("OpenGL context could not be initialized: {}", e.what());
+        return nullptr;
+    }
+}
+
+MelonDsDs::OpenGLRenderState::OpenGLRenderState(RenderMode mode) : _mode(mode) {
+    ZoneScopedN(TracyFunction);
+    retro::debug(TracyFunction);
+    retro_assert(UsesOpenGl(mode));
+
+    // melonDS's OpenGL renderer needs at least OpenGL 3.2
+    // (it doesn't use the legacy fixed-function pipeline).
+    // Its compute renderer's shaders are "#version 430 core", so that one needs 4.3.
+    // The frontend gets exactly one version request per context,
+    // which is why each render mode gets its own OpenGLRenderState.
+    _hw_render.context_type = RETRO_HW_CONTEXT_OPENGL_CORE;
+    _hw_render.version_major = LEGACY_GL_VERSION.first;
+    _hw_render.version_minor = LEGACY_GL_VERSION.second;
+#ifdef HAVE_COMPUTE_RENDERER
+    if (UsesComputeRenderer()) {
+        _hw_render.version_major = COMPUTE_GL_VERSION.first;
+        _hw_render.version_minor = COMPUTE_GL_VERSION.second;
+    }
+#endif
+    _hw_render.context_reset = HardwareContextReset;
+    _hw_render.context_destroy = HardwareContextDestroyed;
+    _hw_render.depth = true;
+    _hw_render.stencil = false;
+    _hw_render.bottom_left_origin = true;
+    _hw_render.cache_context = false;
+
+    bool wantsDebugContext = std::getenv("MELONDSDS_OPENGL_DEBUG_CONTEXT") != nullptr;
+    _hw_render.debug_context = wantsDebugContext;
+
+    // If this succeeds, the frontend fills in _hw_render's function pointers
+    // (but it won't call them until the context is reset)
+    if (!retro::set_hw_render(_hw_render)) {
+        throw opengl_not_initialized_exception();
+    }
+
+    retro_assert(_hw_render.debug_context == wantsDebugContext);
+
+    gl_query_core_context_set(_hw_render.context_type == RETRO_HW_CONTEXT_OPENGL_CORE);
+}
+
+MelonDsDs::OpenGLRenderState::~OpenGLRenderState() noexcept {
+    retro::debug(TracyFunction);
+    if (_contextInitialized) {
+        TracyGpuZone(TracyFunction);
+        BindState();
+        glDeleteVertexArrays(1, &vao);
+        glDeleteBuffers(1, &vbo);
+        glDeleteBuffers(1, &ubo);
+        glDeleteProgram(_screenProgram);
+        UnbindState();
+
+#if defined(HAVE_TRACY) && !defined(__APPLE__)
+        _tracyCapture = std::nullopt;
+#endif
+    }
+    gl_query_core_context_unset();
+
+    // Disable OpenGL hardware rendering;
+    // this may not actually tear down the OpenGL context
+    // (i.e. the frame may still be presented with OpenGL),
+    // but it does signal to the frontend that we're back to software rendering.
+    retro_hw_render_callback none {};
+    none.context_type = RETRO_HW_CONTEXT_NONE;
+    retro::set_hw_render(none);
+}
+
+void MelonDsDs::OpenGLRenderState::ContextReset(melonDS::NDS& nds, const CoreConfig& config) {
+    ZoneScopedN(TracyFunction);
+    retro::debug(TracyFunction);
+
+    // Initialize all OpenGL function pointers
+    retro::debug("Initializing OpenGL function pointers");
+    if (!_hw_render.get_proc_address || !_hw_render.get_current_framebuffer) {
+        retro::error("Frontend didn't provide the get_proc_address and get_current_framebuffer callbacks");
+        throw opengl_not_initialized_exception();
+    }
+
+    // The core doesn't link against OpenGL,
+    // so the OpenGL 1.0/1.1 functions that glsym doesn't cover
+    // must be resolved before we make our first OpenGL call
+    // (see PlatformOGLPrivate.h)
+    rglgen_resolve_symbols_custom(
+        reinterpret_cast<rglgen_proc_address_t>(_hw_render.get_proc_address),
+        melondsds_base_gl_symbol_map
+    );
+
+    unsigned missingSymbols = 0;
+    for (const rglgen_sym_map* entry = melondsds_base_gl_symbol_map; entry->sym; ++entry) {
+        void* address = nullptr;
+        memcpy(&address, entry->ptr, sizeof(address));
+        if (!address) {
+            retro::error("Frontend couldn't resolve {}", entry->sym);
+            ++missingSymbols;
+        }
+    }
+
+    if (missingSymbols) {
+        retro::error("Frontend couldn't resolve {} OpenGL functions, can't use the OpenGL renderer", missingSymbols);
+        throw opengl_not_initialized_exception();
+    }
+
+    // Now resolve everything else that glsym knows about
+    rglgen_resolve_symbols(_hw_render.get_proc_address);
+    TracyGpuContext; // Must be called AFTER the function pointers are bound!
+
+    const char *vendor   = (const char*)glGetString(GL_VENDOR);
+    const char *rendererName = (const char*)glGetString(GL_RENDERER);
+    const char *version  = (const char*)glGetString(GL_VERSION);
+
+    retro::info("OpenGL version: {}", version ? version : "<null>");
+    retro::info("OpenGL vendor: {}", vendor ? vendor : "<null>");
+    retro::info("OpenGL renderer: {}", rendererName ? rendererName : "<null>");
+
+    // The frontend may have said yes to our version request and then handed us something older;
+    // find out before melonDS's renderer tries to use features that aren't there
+    CheckContextVersion();
+
+    // Start using OpenGL on the frontend's framebuffer
+    retro::debug("Binding GL state");
+    BindState();
+    retro::debug("Bound GL state");
+
+    try {
+        GLuint fbo = CurrentFramebuffer();
+        retro_assert(glIsFramebuffer(fbo) == GL_TRUE);
+        GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        retro::debug("Current OpenGL framebuffer: id={}, status={}", fbo, static_cast<FormattedGLEnum>(status));
+
+        // Any renderer left over from a previous context gave up its OpenGL objects
+        // in RenderStateWrapper::ContextDestroyed, back when that context was still current;
+        // deleting them here would delete names that this context never handed out.
+        // (The "correct" way to do this would be to add a Reinitialize() method to GLRenderer
+        // that recreates all resources)
+        nds.SetRenderer(std::make_unique<melonDS::GLRenderer>(nds, UsesComputeRenderer()));
+
+        // melonDS installs its own software renderer if the one we gave it failed to start,
+        // so that's how we find out whether this worked.
+        if (!dynamic_cast<melonDS::GLRenderer*>(&nds.GetRenderer())) {
+            retro::error("Failed to initialize {} renderer!", _mode);
+            throw opengl_not_initialized_exception(
+                "melonDS's OpenGL renderer failed to initialize",
+                "The OpenGL renderer failed to initialize; using software rendering instead."
+            );
+        }
+        retro::debug("Constructed {} renderer", _mode);
+        MarkRendererInstalled();
+        ApplyRendererSettings(nds, config);
+        _appliedScaleFactor = config.ScaleFactor();
+        _appliedBetterPolygons = config.BetterPolygonSplitting();
+        _appliedHiresCoordinates = config.HiresCoordinates();
+        retro::debug("Installed {} renderer and applied its settings", _mode);
+
+        SetUpCoreOpenGlState(config);
+        retro::debug("Initialized core OpenGL state");
+    }
+    catch (...) {
+        // Don't leave our bindings in the frontend's context on the way out
+        UnbindState();
+        throw;
+    }
+    _contextInitialized = true;
+
+    // Stop using OpenGL structures
+    UnbindState();
+    retro::debug("Unbound GL state");
+
+#if defined(HAVE_TRACY) && !defined(__APPLE__)
+    if (tracy::ProfilerAvailable()) {
+        // If we're using Tracy...
+        retro::debug("Using Tracy, will capture OpenGL calls");
+        _tracyCapture.emplace(_openGlDebugAvailable); // ...then get ready to capture OpenGL calls
+    }
+#endif
+
+    retro::debug("OpenGL context reset successfully.");
+}
+
+void MelonDsDs::OpenGLRenderState::CheckContextVersion() {
+    ZoneScopedN(TracyFunction);
+
+    // The frontend may have given us a newer context than we asked for, which is worth knowing:
+    // it decides whether we can switch to the other OpenGL renderer without a new context.
+    _contextVersion = {0, 0};
+    glGetIntegerv(GL_MAJOR_VERSION, &_contextVersion.first);
+    glGetIntegerv(GL_MINOR_VERSION, &_contextVersion.second);
+
+    // Only the compute renderer needs checking:
+    // the frontend can't give us a core-profile context older than 3.2 (there's no such thing),
+    // but it can give us one older than 4.3.
+    // melonDS's compute renderer neither checks the version nor reports shader compile failures,
+    // so a context that's too old would just spew OpenGL errors and draw a black 3D layer.
+    if (!UsesComputeRenderer()) {
+        return;
+    }
+
+    if (_contextVersion < COMPUTE_GL_VERSION) {
+        retro::error(
+            "The compute renderer needs OpenGL {}.{}, but the frontend provided {}.{}",
+            COMPUTE_GL_VERSION.first, COMPUTE_GL_VERSION.second, _contextVersion.first, _contextVersion.second
+        );
+        throw opengl_not_initialized_exception(
+            fmt::format(
+                "OpenGL {}.{} context is too old for the compute renderer",
+                _contextVersion.first, _contextVersion.second
+            ),
+            "This frontend's OpenGL version is too old for the compute renderer; using software rendering instead."
+        );
+    }
+
+    retro::debug(
+        "OpenGL {}.{} context is new enough for the compute renderer",
+        _contextVersion.first, _contextVersion.second
+    );
+}
+
+bool MelonDsDs::OpenGLRenderState::CanHost(RenderMode mode) const noexcept {
+    if (!_contextInitialized || !UsesOpenGl(mode)) {
+        // If we don't know what we've got yet, or if this isn't an OpenGL renderer at all...
+        return false;
+    }
+
+#ifdef HAVE_COMPUTE_RENDERER
+    if (mode == RenderMode::Compute) {
+        return _contextVersion >= COMPUTE_GL_VERSION;
+    }
+#endif
+
+    // Any core context we could've been given is at least 3.2, which the legacy renderer needs
+    return true;
+}
+
+void MelonDsDs::OpenGLRenderState::SetMode(RenderMode mode) noexcept {
+    retro_assert(CanHost(mode));
+
+    _mode = mode;
+
+    // The screen layout's vertices and the shader config don't depend on the renderer,
+    // but melonDS's new renderer starts with an empty output texture
+    _needsRefresh = true;
+}
+
+// Sets up OpenGL resources specific to melonDS
+void MelonDsDs::OpenGLRenderState::SetUpCoreOpenGlState(const CoreConfig& config) {
+    ZoneScopedN(TracyFunction);
+    TracyGpuZone(TracyFunction);
+    retro::debug(TracyFunction);
+
+    {
+        ZoneScopedN("gl_check_capability");
+        _openGlDebugAvailable = gl_check_capability(GL_CAPS_DEBUG);
+    }
+    if (_openGlDebugAvailable) {
+        retro::debug("OpenGL debugging extensions are available");
+    }
+
+    // TODO: Check gl_check_capability for GL_CAPS_VAO and GL_CAPS_FBO
+
+    bool shaderCompiled = melonDS::OpenGL::CompileVertexFragmentProgram(
+        _screenProgram,
+        embedded_melondsds_vertex_shader,
+        embedded_melondsds_fragment_shader,
+        SHADER_PROGRAM_NAME,
+        {
+            {"vPosition", 0},
+            {"vTexcoord", 1},
+        },
+        {
+            {"oColor", 0},
+        }
+    );
+
+    if (!shaderCompiled)
+        throw shader_compilation_failed_exception("Failed to compile and link melonDS DS screen shader program.");
+
+    if (_openGlDebugAvailable) {
+        // TODO: Fall back to glLabelObjectEXT if glObjectLabel isn't available
+        glObjectLabel(GL_PROGRAM, _screenProgram, -1, SHADER_PROGRAM_NAME);
+    }
+
+    GLuint uConfigBlockIndex = glGetUniformBlockIndex(_screenProgram, "uConfig");
+    glUniformBlockBinding(_screenProgram, uConfigBlockIndex, SHADER_CONFIG_UBO_BINDING);
+
+    glUseProgram(_screenProgram);
+    GLuint uni_id = glGetUniformLocation(_screenProgram, "ScreenTex");
+    glUniform1i(uni_id, 0);
+
+    memset(&GL_ShaderConfig, 0, sizeof(GL_ShaderConfig));
+
+    glGenBuffers(1, &ubo);
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    if (_openGlDebugAvailable) {
+        glObjectLabel(GL_BUFFER, ubo, -1, "melonDS DS Shader Config UBO");
+    }
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GL_ShaderConfig), &GL_ShaderConfig, GL_STATIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, SHADER_CONFIG_UBO_BINDING, ubo);
+
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    if (_openGlDebugAvailable) {
+        glObjectLabel(GL_BUFFER, vbo, -1, "melonDS DS Screen Vertex Buffer");
+    }
+    glBufferData(GL_ARRAY_BUFFER, sizeof(screen_vertices), nullptr, GL_STATIC_DRAW);
+
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+    if (_openGlDebugAvailable) {
+        glObjectLabel(GL_VERTEX_ARRAY, vao, -1, "melonDS DS Screen VAO");
+    }
+    glEnableVertexAttribArray(0); // position
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *) offsetof(Vertex, position));
+    glEnableVertexAttribArray(1); // texcoord
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *) offsetof(Vertex, texcoord));
+
+    // We don't create a screen texture of our own;
+    // Render samples the one that melonDS's renderer owns.
+
+    _needsRefresh = true;
+}
+
+void MelonDsDs::OpenGLRenderState::Render(
+    melonDS::NDS& nds,
+    const InputState& input,
+    const CoreConfig& config,
+    const ScreenLayoutData& screenLayout
+) noexcept {
+    ZoneScopedN(TracyFunction);
+    TracyGpuZone(TracyFunction);
+    retro_assert(dynamic_cast<melonDS::GLRenderer*>(&nds.GetRenderer()) != nullptr);
+
+    // Binds the frontend's framebuffer, the screen shader, the VAO/VBO/UBO,
+    // and resets whatever fixed-function state the frontend or melonDS may have changed
+    BindState();
+
+    if (
+        _appliedBetterPolygons != config.BetterPolygonSplitting()
+        || _appliedScaleFactor != config.ScaleFactor()
+        || _appliedHiresCoordinates != config.HiresCoordinates()
+    ) {
+        // If any of the OpenGL renderer's settings have changed...
+        _needsRefresh = true;
+    }
+
+    if (_needsRefresh) {
+        InitFrameState(nds, config, screenLayout);
+        _needsRefresh = false;
+    }
+
+    if (!nds.IsLidClosed() && input.CursorVisible()) {
+        float cursorSize = config.CursorSize();
+        ScreenLayout layout = screenLayout.Layout();
+        ivec2 touch = clamp(input.ConsoleTouchPosition(), ivec2(0), ivec2(NDS_SCREEN_WIDTH - 1, NDS_SCREEN_HEIGHT - 1));
+
+        bool secondaryTouchInBounds =
+            (input.TouchPosition().x >= 0 && input.TouchPosition().x < NDS_SCREEN_WIDTH) &&
+            (input.TouchPosition().y >= 0 && input.TouchPosition().y < NDS_SCREEN_HEIGHT);
+        bool touchUsesHybrid =
+            (layout == ScreenLayout::HybridBottom || layout == ScreenLayout::FlippedHybridBottom) &&
+            (screenLayout.HybridSmallScreenLayout() == HybridSideScreenDisplay::One || !secondaryTouchInBounds);
+
+        const mat3& touchScreenMatrix = touchUsesHybrid ? screenLayout.GetHybridScreenMatrix() : screenLayout.GetBottomScreenMatrix();
+
+        vec3 p0 = touchScreenMatrix * vec3(vec2(touch) - vec2(cursorSize), 1.0f);
+        vec3 p1 = touchScreenMatrix * vec3(vec2(touch) + vec2(cursorSize), 1.0f);
+        float x0 = std::min(p0.x, p1.x);
+        float y0 = std::min(p0.y, p1.y);
+        float x1 = std::max(p0.x, p1.x);
+        float y1 = std::max(p0.y, p1.y);
+        GL_ShaderConfig.cursorPos = vec4(x0, y0, x1, y1);
+        GL_ShaderConfig.cursorVisible = true;
+    } else {
+        GL_ShaderConfig.cursorVisible = false;
+    }
+
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(GL_ShaderConfig), &GL_ShaderConfig);
+
+    glViewport(0, 0, screenLayout.BufferWidth(), screenLayout.BufferHeight());
+
+    // Bind melonDS's output texture to texture unit 0 (the active unit after BindState).
+    // In OpenGL mode this is a 2D array texture with one layer per screen,
+    // and GetFramebuffers hands back a pointer to the texture's name
+    // (which belongs to the renderer, so don't keep it).
+    void* outputTexture = nullptr;
+    void* unused = nullptr;
+    [[maybe_unused]] bool inMainMemory = nds.GPU.GetFramebuffers(&outputTexture, &unused);
+    retro_assert(!inMainMemory);
+    retro_assert(outputTexture != nullptr);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, *static_cast<const GLuint*>(outputTexture));
+
+    // Set the filtering mode for the active texture
+    // For simplicity, we'll just use the same filter for both minification and magnification
+    GLint filter = config.ScreenFilter() == ScreenFilter::Linear ? GL_LINEAR : GL_NEAREST;
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, filter);
+
+    if (nds.IsLidClosed()) [[unlikely]] {
+        // If the emulated lid is closed, just draw a blank
+        // so that there's no annoying flickering with some games
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+    else {
+        glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+    }
+
+    glFlush();
+
+    UnbindState();
+
+#if defined(HAVE_TRACY) && !defined(__APPLE__)
+    if (_tracyCapture) {
+        // TODO: Expose the FBO that the emulator's GLRenderer uses for rendering, then pass it here
+        _tracyCapture->CaptureFrame(CurrentFramebuffer(), config.ScaleFactor());
+    }
+#endif
+
+    retro::video_refresh(
+        RETRO_HW_FRAME_BUFFER_VALID,
+        screenLayout.BufferWidth(),
+        screenLayout.BufferHeight(),
+        0
+    );
+    TracyGpuCollect;
+}
+
+void MelonDsDs::OpenGLRenderState::ContextDestroyed() {
+    ZoneScopedN(TracyFunction);
+//    TracyGpuZone(TracyFunction);
+    retro::debug(TracyFunction);
+    _openGlDebugAvailable = false;
+    _needsRefresh = false;
+    _contextInitialized = false;
+    // melonDS's renderer went away with the context, and so did what we knew about it
+    _installedMode = std::nullopt;
+    _contextVersion = {0, 0};
+    _appliedScaleFactor = 0;
+    _appliedBetterPolygons = false;
+    _appliedHiresCoordinates = false;
+    screen_vertices = {};
+    vertexCount = 0;
+    GL_ShaderConfig = {};
+
+    // The frontend may be destroying a context that this state never got,
+    // such as the one it had while we were rendering in software.
+    // Then we never created these objects,
+    // and may not have even loaded the OpenGL functions to delete them with.
+    if (_screenProgram) {
+        glDeleteProgram(_screenProgram);
+        _screenProgram = 0;
+    }
+
+    if (vao) {
+        glDeleteVertexArrays(1, &vao);
+        vao = 0;
+    }
+
+    if (vbo) {
+        glDeleteBuffers(1, &vbo);
+        vbo = 0;
+    }
+
+    if (ubo) {
+        glDeleteBuffers(1, &ubo);
+        ubo = 0;
+    }
+
+#if defined(HAVE_TRACY) && !defined(__APPLE__)
+    _tracyCapture = std::nullopt;
+#endif
+}
+
+GLuint MelonDsDs::OpenGLRenderState::CurrentFramebuffer() const noexcept {
+    retro_assert(_hw_render.get_current_framebuffer != nullptr);
+    return static_cast<GLuint>(_hw_render.get_current_framebuffer());
+}
+
+// This and UnbindState replace the parts of libretro-common's glsm
+// that melonDS DS actually used, before glsm was removed from libretro-common.
+MelonDsDs::ShaderCompileProgress MelonDsDs::OpenGLRenderState::CompileShaders(
+    melonDS::NDS& nds,
+    std::chrono::microseconds budget
+) noexcept {
+    melonDS::Renderer& renderer = nds.GetRenderer();
+    if (!renderer.NeedsShaderCompile()) [[likely]] {
+        // The legacy renderer compiles everything in its constructor, so this is the usual case
+        return {};
+    }
+
+    ZoneScopedN(TracyFunction);
+    TracyGpuZone(TracyFunction);
+    retro_assert(_contextInitialized);
+
+    // melonDS doesn't report shaders that failed to compile,
+    // so OpenGL's error queue is the only signal we get
+    // (such as GL_INVALID_ENUM from glCreateShader(GL_COMPUTE_SHADER)
+    // on a context that doesn't have compute shaders).
+    // Drain it first so that we only see the compiler's errors.
+    while (glGetError() != GL_NO_ERROR) {
+        // (there's nothing to do with these but discard them)
+    }
+
+    // melonDS compiles one program per call so that a frontend can spread the work out;
+    // its own Qt frontend does the same thing with the same time budget.
+    int current = 0;
+    int count = 0;
+    auto deadline = std::chrono::steady_clock::now() + budget;
+    do {
+        ZoneScopedN("melonDS::ComputeRenderer3D::ShaderCompileStep");
+        renderer.ShaderCompileStep(current, count);
+    } while (renderer.NeedsShaderCompile() && std::chrono::steady_clock::now() < deadline);
+
+    ShaderCompileProgress progress {
+        // current is the index of the last program compiled, so one more of them are ready
+        .Compiled = std::min(current + 1, count),
+        .Total = count,
+        .Done = !renderer.NeedsShaderCompile(),
+        .Failed = false,
+    };
+
+    for (GLenum error = glGetError(); error != GL_NO_ERROR; error = glGetError()) {
+        retro::error(
+            "OpenGL error {} while compiling shader {} of {} for the {} renderer",
+            static_cast<FormattedGLEnum>(error), progress.Compiled, progress.Total, _mode
+        );
+        progress.Failed = true;
+    }
+
+    if (progress.Done && !progress.Failed) {
+        retro::info("Compiled {} shader programs for the {} renderer", progress.Total, _mode);
+    }
+
+    return progress;
+}
+
+// Unlike glsm, nothing here is tracked through wrappers;
+// melonDS DS and melonDS both call OpenGL directly,
+// so we just apply the state we know the core needs.
+void MelonDsDs::OpenGLRenderState::BindState() noexcept {
+    ZoneScopedN(TracyFunction);
+    TracyGpuZone(TracyFunction);
+
+    // Draw to (and read from) the frontend's framebuffer.
+    // Don't cache it; some frontends hand out a different one each frame.
+    glBindFramebuffer(GL_FRAMEBUFFER, CurrentFramebuffer());
+
+    // Our own resources (all 0 until SetUpCoreOpenGlState runs, which is fine)
+    glUseProgram(_screenProgram);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBindBufferBase(GL_UNIFORM_BUFFER, SHADER_CONFIG_UBO_BINDING, ubo); // Also binds GL_UNIFORM_BUFFER itself
+
+    // Fixed-function state that the screen blit depends on;
+    // the frontend or melonDS's renderer may have left any of it in another state
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE); // For the depth clears in InitFrameState and the closed-lid path
+    glClearColor(0, 0, 0, 0);
+
+    // melonDS's output texture gets bound to unit 0 in Render
+    glActiveTexture(GL_TEXTURE0);
+}
+
+void MelonDsDs::OpenGLRenderState::UnbindState() noexcept {
+    ZoneScopedN(TracyFunction);
+    TracyGpuZone(TracyFunction);
+
+    // Everything below is state that melonDS DS or melonDS's OpenGL renderer sets,
+    // reset to OpenGL's defaults.
+    // melonDS's renderer sets all of it again every frame,
+    // except the uniform buffer it binds to index 0 once at startup;
+    // leave that index alone or its shaders will stop working.
+
+    glUseProgram(0);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, SHADER_CONFIG_UBO_BINDING, 0); // Also unbinds GL_UNIFORM_BUFFER itself
+
+    // melonDS's renderer leaves its readback PBO bound,
+    // which makes the frontend's own glReadPixels (e.g. for screenshots) fail
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+
+#ifdef HAVE_COMPUTE_RENDERER
+    if (CanHost(RenderMode::Compute)) {
+        // The compute renderer's dispatches leave its storage buffers, indirect buffer,
+        // texture buffer and output image bound.
+        // A 3.2 context has none of these targets (and may not even resolve the functions),
+        // hence the check on the context rather than on the mode:
+        // switching to the legacy renderer doesn't unbind what the compute renderer left behind.
+        for (GLuint i = 0; i < COMPUTE_SSBO_BINDINGS; ++i) {
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, 0); // Also unbinds GL_SHADER_STORAGE_BUFFER itself
+        }
+        glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0);
+        glBindBuffer(GL_TEXTURE_BUFFER, 0);
+        glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
+    }
+#endif
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+
+    glBlendFuncSeparate(GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
+    glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+    glBlendColor(0, 0, 0, 0);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE); // Covers the per-buffer masks melonDS sets with glColorMaski
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+    glDepthRange(0, 1);
+    glClearDepth(1);
+    glClearColor(0, 0, 0, 0);
+    glStencilFunc(GL_ALWAYS, 0, ~0u);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    glStencilMask(~0u);
+    glLineWidth(1);
+
+    // melonDS's legacy renderer and compositor only use texture units 0 and 1,
+    // and its compute renderer also binds its texture cache to unit 2
+    // (the texture cache binds 2D array textures to whichever unit is active)
+    for (GLenum unit : {GL_TEXTURE2, GL_TEXTURE1, GL_TEXTURE0}) {
+        glActiveTexture(unit);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+        glBindTexture(GL_TEXTURE_BUFFER, 0);
+    }
+    // (Loop order leaves GL_TEXTURE0 active, which is the default)
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void MelonDsDs::OpenGLRenderState::InitFrameState(melonDS::NDS& nds, const CoreConfig& config, const ScreenLayoutData& screenLayout) noexcept {
+    ZoneScopedN(TracyFunction);
+    TracyGpuZone(TracyFunction);
+    retro_assert(dynamic_cast<melonDS::GLRenderer*>(&nds.GetRenderer()) != nullptr);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    if (
+        _appliedScaleFactor != config.ScaleFactor()
+        || _appliedBetterPolygons != config.BetterPolygonSplitting()
+        || _appliedHiresCoordinates != config.HiresCoordinates()
+    ) {
+        // Only push settings to melonDS when they've actually changed.
+        // A refresh is requested for every screen layout change too,
+        // and the compute renderer rebuilds all of its shaders and buffers on every call.
+        ApplyRendererSettings(nds, config);
+        _appliedScaleFactor = config.ScaleFactor();
+        _appliedBetterPolygons = config.BetterPolygonSplitting();
+        _appliedHiresCoordinates = config.HiresCoordinates();
+    }
+
+    GL_ShaderConfig.uScreenSize = screenLayout.BufferSize();
+    GL_ShaderConfig.u3DScale = screenLayout.Scale();
+    GL_ShaderConfig.cursorPos = vec4(-1);
+
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(GL_ShaderConfig), &GL_ShaderConfig);
+
+    InitVertices(screenLayout);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(screen_vertices), screen_vertices.data());
+}
+
+void MelonDsDs::OpenGLRenderState::InitVertices(const ScreenLayoutData& screenLayout) noexcept {
+    ZoneScopedN(TracyFunction);
+    ScreenLayout layout = screenLayout.Layout();
+    HybridSideScreenDisplay hybridSideScreenDisplay = screenLayout.HybridSmallScreenLayout();
+    vertexCount = GetVertexCount(layout, hybridSideScreenDisplay);
+
+    const array<vec2, 12>& transformedPoints = screenLayout.TransformedScreenPoints();
+    array<unsigned, 18> indexes = GetPositionIndexes(layout);
+
+    // melonDS's OpenGL renderer draws both screens into a single texture,
+    // the top being laid above the bottom without any gap.
+
+    switch (layout) {
+        case ScreenLayout::TurnRight:
+        case ScreenLayout::TurnLeft:
+        case ScreenLayout::UpsideDown:
+        case ScreenLayout::TopBottom:
+        case ScreenLayout::LeftRight:
+        case ScreenLayout::LargescreenTop:
+        case ScreenLayout::FlippedLargescreenBottom:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                // Top screen
+                screen_vertices[i] = {
+                    .position = transformedPoints[indexes[i]],
+                    .texcoord = TOP_SCREEN_TEXCOORDS[i],
+                };
+
+                // Touch screen
+                screen_vertices[i + VERTEXES_PER_SCREEN] = {
+                    .position = transformedPoints[indexes[i + VERTEXES_PER_SCREEN]],
+                    .texcoord = BOTTOM_SCREEN_TEXCOORDS[i],
+                };
+            }
+            break;
+        case ScreenLayout::BottomTop:
+        case ScreenLayout::RightLeft:
+        case ScreenLayout::LargescreenBottom:
+        case ScreenLayout::FlippedLargescreenTop:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                // Top screen
+                screen_vertices[i] = {
+                    .position = transformedPoints[indexes[i]],
+                    .texcoord = BOTTOM_SCREEN_TEXCOORDS[i],
+                };
+
+                // Touch screen
+                screen_vertices[i + VERTEXES_PER_SCREEN] = {
+                    .position = transformedPoints[indexes[i + VERTEXES_PER_SCREEN]],
+                    .texcoord = TOP_SCREEN_TEXCOORDS[i],
+                };
+            }
+            break;
+        case ScreenLayout::TopOnly:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                screen_vertices[i] = {
+                    .position = transformedPoints[indexes[i]],
+                    .texcoord = TOP_SCREEN_TEXCOORDS[i],
+                };
+            }
+            break;
+        case ScreenLayout::BottomOnly:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                screen_vertices[i] = {
+                    .position = transformedPoints[indexes[i]],
+                    .texcoord = BOTTOM_SCREEN_TEXCOORDS[i],
+                };
+            }
+            break;
+        case ScreenLayout::HybridTop:
+        case ScreenLayout::FlippedHybridTop:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                // Hybrid screen
+                screen_vertices[i] = {
+                    .position = transformedPoints[indexes[i]],
+                    .texcoord = TOP_SCREEN_TEXCOORDS[i],
+                };
+
+                // Bottom screen
+                screen_vertices[i + VERTEXES_PER_SCREEN] = {
+                    .position = transformedPoints[indexes[i + VERTEXES_PER_SCREEN]],
+                    .texcoord = BOTTOM_SCREEN_TEXCOORDS[i],
+                };
+
+                // Top screen
+                screen_vertices[i + 2*VERTEXES_PER_SCREEN] = {
+                    .position = transformedPoints[indexes[i + 2*VERTEXES_PER_SCREEN]],
+                    .texcoord = TOP_SCREEN_TEXCOORDS[i],
+                };
+                // (Won't be rendered if hybridSideScreenDisplay == HybridSideScreenDisplay::One)
+            }
+            break;
+        case ScreenLayout::HybridBottom:
+        case ScreenLayout::FlippedHybridBottom:
+            for (unsigned i = 0; i < VERTEXES_PER_SCREEN; ++i) {
+                // Hybrid screen
+                screen_vertices[i] = {
+                    .position = transformedPoints[indexes[i]],
+                    .texcoord = BOTTOM_SCREEN_TEXCOORDS[i],
+                };
+
+                // Top screen
+                screen_vertices[i + VERTEXES_PER_SCREEN] = {
+                    .position = transformedPoints[indexes[i + VERTEXES_PER_SCREEN]],
+                    .texcoord = TOP_SCREEN_TEXCOORDS[i],
+                };
+
+                // Bottom screen
+                screen_vertices[i + 2*VERTEXES_PER_SCREEN] = {
+                    .position = transformedPoints[indexes[i + 2*VERTEXES_PER_SCREEN]],
+                    .texcoord = BOTTOM_SCREEN_TEXCOORDS[i],
+                };
+                // (Won't be rendered if hybridSideScreenDisplay == HybridSideScreenDisplay::One)
+            }
+            break;
+    }
+}

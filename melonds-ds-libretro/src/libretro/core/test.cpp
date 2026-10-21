@@ -1,0 +1,450 @@
+/*
+    Copyright 2024 Jesse Talavera
+
+    melonDS DS is free software: you can redistribute it and/or modify it under
+    the terms of the GNU General Public License as published by the Free
+    Software Foundation, either version 3 of the License, or (at your option)
+    any later version.
+
+    melonDS DS is distributed in the hope that it will be useful, but WITHOUT ANY
+    WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+    FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with melonDS DS. If not, see http://www.gnu.org/licenses/.
+*/
+
+#include "test.hpp"
+
+#include <cmath>
+#include <string_view>
+
+#include <string/stdstring.h>
+
+#include "config/console.hpp"
+#include "core.hpp"
+#include "environment.hpp"
+#include "input/rumble.hpp"
+
+namespace MelonDsDs
+{
+    // sshhh...don't tell anyone
+    extern CoreState& Core;
+}
+
+extern "C" int libretropy_add_integers(int a, int b) {
+    return a + b;
+}
+
+extern "C" bool libretropy_send_message(const char* message) {
+    return retro::set_error_message("{}", message);
+}
+
+extern "C" const char* libretropy_get_option(const char* key) {
+    retro_variable var { key, nullptr };
+    bool ok = retro::get_variable(&var);
+
+    return ok ? var.value : nullptr;
+}
+
+extern "C" unsigned libretropy_get_options_version() {
+    unsigned version = 0;
+    retro::environment(RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION, &version);
+
+    return version;
+}
+
+extern "C" unsigned libretropy_get_message_version() {
+    unsigned version = 0;
+    retro::environment(RETRO_ENVIRONMENT_GET_MESSAGE_INTERFACE_VERSION, &version);
+
+    return version;
+}
+
+extern "C" bool libretropy_get_input_bitmasks() {
+    bool ok = false;
+
+    return retro::environment(RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, &ok);
+}
+
+extern "C" uint64_t libretropy_get_input_device_capabilities() {
+    uint64_t caps = 0;
+    retro::environment(RETRO_ENVIRONMENT_GET_INPUT_DEVICE_CAPABILITIES, &caps);
+
+    return caps;
+}
+
+extern "C" const char* libretropy_get_system_directory() {
+    const char* path = nullptr;
+    bool ok = retro::environment(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &path);
+    return ok ? path : nullptr;
+}
+
+extern "C" const char* libretropy_get_save_directory() {
+    const char* path = nullptr;
+    bool ok = retro::environment(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &path);
+    return ok ? path : nullptr;
+}
+
+extern "C" bool libretropy_get_power(retro_device_power* power) {
+    return retro::environment(RETRO_ENVIRONMENT_GET_DEVICE_POWER, power);
+}
+
+extern "C" bool melondsds_console_exists() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    return console != nullptr;
+}
+
+extern "C" bool melondsds_arm7_bios_native() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    return console ? console->IsLoadedARM7BIOSKnownNative() : false;
+}
+
+extern "C" bool melondsds_arm9_bios_native() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    return console ? console->IsLoadedARM7BIOSKnownNative() : false;
+}
+
+extern "C" bool melondsds_firmware_native() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    return console ? console->GetFirmware().GetHeader().Identifier != melonDS::GENERATED_FIRMWARE_IDENTIFIER : false;
+}
+
+extern "C" size_t melondsds_gba_rom_length() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!(console && console->GetGBACart()))
+        return 0;
+
+    return console->GetGBACart()->GetROMLength();
+}
+
+extern "C" const uint8_t* melondsds_gba_rom() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!(console && console->GetGBACart()))
+        return nullptr;
+
+    return console->GetGBACart()->GetROM();
+}
+
+extern "C" size_t melondsds_gba_sram_length() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!(console && console->GetGBACart()))
+        return 0;
+
+    return console->GetGBACart()->GetSaveMemoryLength();
+}
+
+extern "C" const uint8_t* melondsds_gba_sram() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!(console && console->GetGBACart()))
+        return nullptr;
+
+    return console->GetGBACart()->GetSaveMemory();
+}
+
+extern "C" int melondsds_analog_cursor_x() {
+    using namespace MelonDsDs;
+    return Core.GetInputState().JoystickTouchPosition().x;
+}
+
+extern "C" int melondsds_analog_cursor_y() {
+    using namespace MelonDsDs;
+    return Core.GetInputState().JoystickTouchPosition().y;
+}
+
+extern "C" int melondsds_screen_layout() {
+    using namespace MelonDsDs;
+    return static_cast<int>(Core.GetScreenLayoutData().Layout());
+}
+
+extern "C" bool melondsds_is_opengl_renderer() {
+    using namespace MelonDsDs;
+    auto mode = Core.GetRenderMode();
+
+    return mode && *mode == RenderMode::OpenGl;
+}
+
+extern "C" bool melondsds_is_software_renderer() {
+    using namespace MelonDsDs;
+    auto mode = Core.GetRenderMode();
+
+    return mode && *mode == RenderMode::Software;
+}
+
+extern "C" bool melondsds_is_compute_renderer() {
+    using namespace MelonDsDs;
+    auto mode = Core.GetRenderMode();
+
+    return mode && *mode == RenderMode::Compute;
+}
+
+extern "C" unsigned melondsds_num_cheats() {
+    using namespace MelonDsDs;
+    const auto *console = Core.GetConsole();
+    if (!console)
+        return 0;
+
+    return console->AREngine.Cheats.size();
+}
+
+extern "C" uint32_t melondsds_get_gba_cart_type() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!console)
+        return 0;
+
+    if (!console->GetGBACart())
+        return 0;
+
+    return static_cast<int>(console->GetGBACart()->Type());
+}
+
+extern "C" int32_t melondsds_get_solar_sensor_level() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!console)
+        return -1;
+
+    const auto* solar = dynamic_cast<const melonDS::GBACart::CartGameSolarSensor*>(console->GetGBACart());
+    if (!solar)
+        return -1;
+
+    return solar->GetLightLevel();
+}
+
+/// \return The strength most recently computed for the frontend's rumble motors,
+/// or -1 if there's no Rumble Pak in Slot-2.
+extern "C" int32_t melondsds_get_rumble_level() {
+    using namespace MelonDsDs;
+
+    return Core.GetInputState().RumbleLevel();
+}
+
+/// \return The number of Rumble Pak register toggles counted in the most recent frame,
+/// or -1 if there's no Rumble Pak in Slot-2.
+extern "C" int32_t melondsds_get_rumble_edges() {
+    using namespace MelonDsDs;
+
+    return Core.GetInputState().RumbleEdges();
+}
+
+/// \return The number of frames that the rumble envelope averages over.
+extern "C" uint32_t melondsds_rumble_envelope_window() {
+    return static_cast<uint32_t>(MelonDsDs::RUMBLE_WINDOW_FRAMES);
+}
+
+/// Runs a fresh rumble envelope over a synthetic series of per-frame toggle counts,
+/// without touching the console or the frontend's motors.
+///
+/// \param edges The number of Rumble Pak register toggles in each frame.
+/// \param count The length of \c edges, and of \c out.
+/// \param out Receives the motor strength that each frame would produce.
+/// \return The number of frames written to \c out.
+extern "C" uint32_t melondsds_rumble_filter(const uint32_t* edges, uint32_t count, uint16_t* out) {
+    using namespace MelonDsDs;
+
+    if (!edges || !out)
+        return 0;
+
+    RumbleEnvelope envelope;
+    for (uint32_t i = 0; i < count; ++i) {
+        envelope.Push(edges[i]);
+        out[i] = static_cast<uint16_t>(std::lround(envelope.Level() * UINT16_MAX));
+    }
+
+    return count;
+}
+
+/// Copies halfwords out of the sub engine's background VRAM,
+/// the way the emulated console sees it at <tt>0x06200000 + offset</tt>.
+/// libnds's demo console keeps its tile map here,
+/// so this is how the tests read the text that homebrew prints.
+///
+/// \param offset Where to start copying, in bytes past the start of the sub engine's background VRAM.
+/// \param out Receives the copied halfwords.
+/// \param count The number of halfwords to copy.
+/// \return The number of halfwords written to \c out,
+/// or 0 if there's no console.
+extern "C" uint32_t melondsds_read_sub_bg_vram(uint32_t offset, uint16_t* out, uint32_t count) {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!console || !out)
+        return 0;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        out[i] = console->GPU.ReadVRAM_BBG<uint16_t>(offset + i * sizeof(uint16_t));
+    }
+
+    return count;
+}
+
+extern "C" unsigned melondsds_get_controller_port_device(unsigned port) noexcept {
+    using namespace MelonDsDs;
+
+    return Core.GetInputState().GetControllerPortDevice(port);
+}
+
+/// \return The type of the emulated console
+/// (0 for a DS, 1 for a DSi, matching melonDS::NDS::ConsoleType),
+/// or -1 if no console has been created.
+extern "C" int32_t melondsds_get_console_type() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    if (!console)
+        return -1;
+
+    return console->ConsoleType;
+}
+
+/// \return \c true if \c gameCode is shaped like a real NDS game code.
+/// The core uses this to tell homebrew apart from a retail release.
+/// \param gameCode A NUL-terminated string,
+/// so that the tests can exercise the length check.
+extern "C" bool melondsds_is_valid_game_code(const char* gameCode) {
+    using namespace MelonDsDs;
+
+    return gameCode && IsValidGameCode(std::string_view(gameCode));
+}
+
+/// \return \c true if a cartridge is inserted into the emulated console's Slot-1.
+/// A title installed onto the DSi's NAND isn't in the cart slot,
+/// so this distinguishes the two ways of running DSi content.
+extern "C" bool melondsds_nds_cart_inserted() {
+    using namespace MelonDsDs;
+    const melonDS::NDS* console = Core.GetConsole();
+
+    return console && console->GetNDSCart() != nullptr;
+}
+
+extern "C" retro_proc_address_t MelonDsDs::GetRetroProcAddress(const char* sym) noexcept {
+    if (string_is_equal(sym, "libretropy_add_integers"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_add_integers);
+
+    if (string_is_equal(sym, "libretropy_get_system_directory"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_system_directory);
+
+    if (string_is_equal(sym, "libretropy_get_save_directory"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_save_directory);
+
+    if (string_is_equal(sym, "libretropy_send_message"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_send_message);
+
+    if (string_is_equal(sym, "libretropy_get_option"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_option);
+
+    if (string_is_equal(sym, "libretropy_get_options_version"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_options_version);
+
+    if (string_is_equal(sym, "libretropy_get_message_version"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_message_version);
+
+    if (string_is_equal(sym, "libretropy_get_input_bitmasks"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_input_bitmasks);
+
+    if (string_is_equal(sym, "libretropy_get_input_device_capabilities"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_input_device_capabilities);
+
+    if (string_is_equal(sym, "libretropy_get_power"))
+        return reinterpret_cast<retro_proc_address_t>(libretropy_get_power);
+
+    if (string_is_equal(sym, "melondsds_console_exists"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_console_exists);
+
+    if (string_is_equal(sym, "melondsds_arm7_bios_native"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_arm7_bios_native);
+
+    if (string_is_equal(sym, "melondsds_arm9_bios_native"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_arm9_bios_native);
+
+    if (string_is_equal(sym, "melondsds_firmware_native"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_firmware_native);
+
+    if (string_is_equal(sym, "melondsds_gba_rom_length"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_gba_rom_length);
+
+    if (string_is_equal(sym, "melondsds_gba_rom"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_gba_rom);
+
+    if (string_is_equal(sym, "melondsds_gba_sram_length"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_gba_sram_length);
+
+    if (string_is_equal(sym, "melondsds_gba_sram"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_gba_sram);
+
+    if (string_is_equal(sym, "melondsds_analog_cursor_x"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_analog_cursor_x);
+
+    if (string_is_equal(sym, "melondsds_analog_cursor_y"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_analog_cursor_y);
+
+    if (string_is_equal(sym, "melondsds_screen_layout"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_screen_layout);
+
+    if (string_is_equal(sym, "melondsds_is_opengl_renderer"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_is_opengl_renderer);
+
+    if (string_is_equal(sym, "melondsds_is_software_renderer"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_is_software_renderer);
+
+    if (string_is_equal(sym, "melondsds_is_compute_renderer"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_is_compute_renderer);
+
+    if (string_is_equal(sym, "melondsds_num_cheats"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_num_cheats);
+
+    if (string_is_equal(sym, "melondsds_get_gba_cart_type"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_get_gba_cart_type);
+
+    if (string_is_equal(sym, "melondsds_get_solar_sensor_level"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_get_solar_sensor_level);
+
+    if (string_is_equal(sym, "melondsds_get_rumble_level"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_get_rumble_level);
+
+    if (string_is_equal(sym, "melondsds_get_rumble_edges"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_get_rumble_edges);
+
+    if (string_is_equal(sym, "melondsds_rumble_envelope_window"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_rumble_envelope_window);
+
+    if (string_is_equal(sym, "melondsds_rumble_filter"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_rumble_filter);
+
+    if (string_is_equal(sym, "melondsds_read_sub_bg_vram"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_read_sub_bg_vram);
+
+    if (string_is_equal(sym, "melondsds_get_controller_port_device"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_get_controller_port_device);
+
+    if (string_is_equal(sym, "melondsds_get_console_type"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_get_console_type);
+
+    if (string_is_equal(sym, "melondsds_is_valid_game_code"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_is_valid_game_code);
+
+    if (string_is_equal(sym, "melondsds_nds_cart_inserted"))
+        return reinterpret_cast<retro_proc_address_t>(melondsds_nds_cart_inserted);
+
+    return nullptr;
+}
+

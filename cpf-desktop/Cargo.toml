@@ -1,0 +1,4 @@
+[workspace]
+members = ["crates/cpf-core", "crates/cpf-runtime-worker", "src-tauri"]
+resolver = "2"
+
