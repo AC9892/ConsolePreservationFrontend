@@ -1,6 +1,6 @@
 # ConsolePreservationFrontend (CPF)
 
-CPF is a proposed frontend for preserving and reconstructing console environments. This repository currently contains design documentation only. It does not contain a working application, preservation backend, or portable package format.
+CPF is a proposed frontend for preserving and reconstructing console environments. The DSi branch carries an experimental Windows DSi build and its corresponding source. It requires the user's own console system files.
 
 ## Purpose
 
@@ -24,7 +24,7 @@ CPF would be a user interface above a separate preservation data layer. The data
 
 ## Current status
 
-**Experimental design.** This repository contains a README, not frontend code. Capture, import, export, package validation, and reconstruction are not available here.
+**Alpha DSi build.** Download the Windows ZIP below. The unfinished DSi Menu game tile work is excluded. Nintendo BIOS, firmware, NAND, games, saves, and personal data are not included.
 
 ## Planned features
 
@@ -40,3 +40,11 @@ CPF concerns console preservation workflows. [GameBridge](https://github.com/AC9
 
 CPF must not include copyrighted firmware, games, keys, or other proprietary content. Users must supply any required material through lawful channels supported by the relevant tools.
 
+
+
+## Downloads
+
+- `CPF-DSi-v0.1.0-alpha-win64.zip` — Windows application and runtime.
+- `CPF-DSi-v0.1.0-alpha-source.zip` — corresponding CPF and backend source.
+
+SHA-256 checksums are in `SHA256SUMS.txt`.
