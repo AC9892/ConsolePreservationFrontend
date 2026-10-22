@@ -1,3 +1,5 @@
+X leaking my progess lol
+
 # ConsolePreservationFrontend (CPF)
 
 CPF is a proposed frontend for preserving and reconstructing console environments. This repository currently contains design documentation only. It does not contain a working application, preservation backend, or portable package format.
