@@ -34,7 +34,7 @@ The opt-in strncpy bridge accepts at most 256 bytes, validates the complete writ
 
 ## Next work
 
-The current concrete boundary is a missing authentic service provider, not a successful connection. All nine logger probes and 32 transport workers passed independent validation against the frozen component build; 23 component tests and all-target Clippy passed. No successful logger initialize return or original logger teardown is claimed.
+The current concrete boundary is a missing authentic service provider, not a successful connection. All nine logger probes and 32 transport workers passed against the current input-decoder refactor using the existing independently authored validation scripts; 27 component tests and all-target Clippy passed. No successful logger initialize return or original logger teardown is claimed.
 
 `tools/analyze_logger_provider.py ORIGINAL_SHELLCORE` records hash-pinned static provider startup evidence as JSON on stdout. It verifies server creation at module-relative `0x4f2938`, worker entry `0x4f2ea0` calling server vtable slot `+0x10`, and the internal thread-setup wrapper. The original setup requests a 32768-byte stack and scheduling parameter 766 and imports PS4 thread attribute, scheduling, creation and exit APIs. Raw instruction reports belong outside the dump and must remain private.
 
@@ -51,3 +51,5 @@ python -m unittest discover -s tools -p test_logger_provider.py
 ```
 
 The optional Capstone analysis dependency is required. Original server, constructor and method execution remain unverified. The next backend investigation should retain the original IPMI library and target its measured `ipmimgr_call` kernel boundary (NID `Hk7iHmGxB18`), with explicit ownership, guest-memory validation and separate transport/error-result channels. Missing HLE C++ APIs alone do not justify replacing the original client/server library.
+
+The operation-2 input decoder is now shared with the native component harness through an explicit memory-reader interface; see [memory boundary](IPMI_MEMORY_BOUNDARY.md). Static callback analysis also identifies an authorization-based classification gate before method routing. Its caller identity and authentic authorization semantics remain unresolved. The backend's fixed PID and capability stub cannot establish authentic classification. No original method handler has executed successfully.

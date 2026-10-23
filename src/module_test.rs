@@ -3,6 +3,7 @@ mod ipmi;
 mod ipmi_channel;
 mod ipmi_connect;
 mod ipmi_kernel;
+mod ipmi_memory;
 mod ipmi_rpc;
 mod ipmi_server;
 #[cfg(all(windows, target_arch = "x86_64"))]
@@ -389,6 +390,18 @@ mod native {
             } == 0
                 || info.State != MEM_COMMIT
                 || info.Protect & (PAGE_GUARD | PAGE_NOACCESS) != 0
+            {
+                return false;
+            }
+            if ![
+                PAGE_READONLY,
+                PAGE_READWRITE,
+                PAGE_WRITECOPY,
+                PAGE_EXECUTE_READ,
+                PAGE_EXECUTE_READWRITE,
+                PAGE_EXECUTE_WRITECOPY,
+            ]
+            .contains(&info.Protect)
             {
                 return false;
             }
@@ -1128,20 +1141,18 @@ mod native {
         if kid != 0 || bytes != 24 || !can_access(output, 4, true) {
             stop("Invalid client-create transport arguments");
         }
-        let request =
-            ipmi::decode_create_request(&read(params, bytes)).unwrap_or_else(|e| stop(&e));
-        let descriptor = ipmi::decode_create_descriptor(&read(
-            request.config as usize,
-            ipmi::CREATE_DESCRIPTOR_BYTES,
-        ))
+        let input = crate::ipmi_memory::client_create(params as u64, bytes, |address, size| {
+            let address =
+                usize::try_from(address).map_err(|_| "Guest address exceeds host width")?;
+            if !can_access(address, size, false) {
+                return Err("Client input is outside readable owned memory/worker stack".into());
+            }
+            Ok(read(address, size))
+        })
         .unwrap_or_else(|e| stop(&e));
-        if !descriptor.diagnostics.is_empty() {
-            stop("Descriptor does not match the recovered native ABI");
-        }
-        let name = string(request.service_name as usize);
-        if !allowed(request.client_impl as usize, 16) {
-            stop("Client object is not in an owned region");
-        }
+        let request = input.request;
+        let descriptor = input.descriptor;
+        let name = input.service;
         let id = CLIENTS
             .with(|clients| {
                 clients
@@ -2668,6 +2679,20 @@ mod native {
             let mut old = 0;
             assert_ne!(
                 unsafe { VirtualProtect(block.address as *const _, 4096, PAGE_READONLY, &mut old) },
+                0
+            );
+            assert!(can_access(address, 8, false));
+            assert!(!can_access(address, 8, true));
+            assert_ne!(
+                unsafe { VirtualProtect(block.address as *const _, 4096, PAGE_EXECUTE, &mut old) },
+                0
+            );
+            assert!(!can_access(address, 8, false));
+            assert!(!can_access(address, 8, true));
+            assert_ne!(
+                unsafe {
+                    VirtualProtect(block.address as *const _, 4096, PAGE_EXECUTE_READ, &mut old)
+                },
                 0
             );
             assert!(can_access(address, 8, false));
