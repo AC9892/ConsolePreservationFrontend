@@ -62,10 +62,13 @@ mod native {
         static ERRNO: UnsafeCell<i32> = const { UnsafeCell::new(0) };
         static THREADED: Cell<bool> = const { Cell::new(false) };
         static REQUEST_PROBE: Cell<bool> = const { Cell::new(false) };
+        static MULTIBUFFER_PROBE: Cell<bool> = const { Cell::new(false) };
         static RPC_ENABLED: Cell<bool> = const { Cell::new(false) };
         static RPC_ERROR: Cell<bool> = const { Cell::new(false) };
         static RPC_ACTIVE: Cell<Option<u32>> = const { Cell::new(None) };
         static RESPOND_EXPORT: Cell<usize> = const { Cell::new(0) };
+        static GENERIC_RESPOND_EXPORT: Cell<usize> = const { Cell::new(0) };
+        static GENERIC_DELIVERY: Cell<bool> = const { Cell::new(false) };
         static REGION: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
         static IMPORTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     }
@@ -336,7 +339,31 @@ mod native {
             let count = u32::from_le_bytes(args[4..8].try_into().unwrap());
             let buffers = usize::from_le_bytes(args[8..16].try_into().unwrap());
             let flags = u32::from_le_bytes(args[16..20].try_into().unwrap());
-            if count != 1 || flags != 0 {
+            if flags == 1 && GENERIC_RESPOND_EXPORT.get() != 0 {
+                if count != 1 || status != if RPC_ERROR.get() { -123 } else { 0 } {
+                    stop("Generic reply capture count/status mismatch");
+                }
+                let descriptor = read(buffers, 24);
+                let pointer = usize::from_le_bytes(descriptor[..8].try_into().unwrap());
+                let capacity = usize::from_le_bytes(descriptor[8..16].try_into().unwrap());
+                let length = usize::from_le_bytes(descriptor[16..24].try_into().unwrap());
+                if capacity != 4
+                    || length != if RPC_ERROR.get() { 0 } else { 4 }
+                    || (!RPC_ERROR.get() && read(pointer, length) != 0x12345678u32.to_le_bytes())
+                {
+                    stop("Generic reply capture descriptor mismatch");
+                }
+                event(
+                    json!({"event":"native-generic-reply-captured","operation":op,"parameter_bytes":bytes,
+                    "flags":flags,"count":count,"method_status":status,"capacity":capacity,"length":length,
+                    "exact_payload_match":true,"client_outputs_written":false,"transport_result_written":false,
+                    "original_shell_service":false,"authentic_dashboard_verified":false}),
+                );
+                if !GENERIC_DELIVERY.get() {
+                    stop("Generic native reply captured; delivery remains unsupported");
+                }
+            }
+            if count != 1 || flags != u32::from(GENERIC_DELIVERY.get()) {
                 stop("RPC probe supports one native response buffer only");
             }
             let descriptor = read(buffers, 24);
@@ -450,11 +477,19 @@ mod native {
                 "synthetic_test_endpoint":true,"original_shell_service":false}),
             );
             if RPC_ENABLED.get() {
-                if request.input_count != 1
-                    || request.output_count != 1
-                    || request.flags != 0
-                    || request.method != 0
-                {
+                if !(if MULTIBUFFER_PROBE.get() {
+                    request.input_count == 3
+                        && request.output_count == 1
+                        && request.flags == 1
+                        && request.method == 0x03299000
+                        && input_bytes == [8, 16, 100]
+                        && output_capacities == [4]
+                } else {
+                    request.input_count == 1
+                        && request.output_count == 1
+                        && request.flags == 0
+                        && request.method == 0
+                }) {
                     stop("RPC probe only supports test method zero and one input/output");
                 }
                 let (session, implementation) = CLIENTS.with(|k| {
@@ -472,7 +507,16 @@ mod native {
                         caller_thread: thread,
                         session_impl: implementation,
                         method: request.method,
-                        input: payloads.remove(0),
+                        input: if MULTIBUFFER_PROBE.get() {
+                            vec![]
+                        } else {
+                            payloads.remove(0)
+                        },
+                        generic_inputs: if MULTIBUFFER_PROBE.get() {
+                            Some(payloads)
+                        } else {
+                            None
+                        },
                         capacity: output_capacities[0],
                     })
                     .unwrap_or_else(|e| stop(e));
@@ -588,12 +632,14 @@ mod native {
                             stop("Queued RPC no longer matches its live native session");
                         }
                         RPC_ACTIVE.set(Some(request.session));
-                        (
-                            request.client,
-                            request.packet(),
-                            0x8051,
-                            28 + request.input.len() as u64,
-                        )
+                        let packet = request.packet();
+                        let input_size = packet.len() as u64 - 4;
+                        let packet_type = if request.generic_inputs.is_some() {
+                            0x8041
+                        } else {
+                            0x8051
+                        };
+                        (request.client, packet, packet_type, input_size)
                     })
                 });
             if queued.is_none() && HANDSHAKE.get() && COMPLETION.get().is_some() && word(24) != 0 {
@@ -1164,6 +1210,100 @@ mod native {
     unsafe extern "sysv64" fn unexpected_test_callback() -> ! {
         stop("Synthetic test callback invoked before session dispatch was implemented")
     }
+    unsafe extern "sysv64" fn generic_test_callback(
+        handler: usize,
+        session: usize,
+        method: u32,
+        inputs: usize,
+        input_count: u32,
+        outputs: usize,
+        output_count: u32,
+    ) -> i32 {
+        let context = DISPATCH
+            .with(|d| *d.borrow())
+            .unwrap_or_else(|| stop("Generic callback lacks context"));
+        let retained = RETAINED_SESSION
+            .with(|s| {
+                s.borrow()
+                    .as_ref()
+                    .map(|(block, id)| (block.address as usize, *id))
+            })
+            .unwrap_or_else(|| stop("Generic callback lacks retained session"));
+        if !MULTIBUFFER_PROBE.get()
+            || !RPC_ENABLED.get()
+            || handler != context.3
+            || session != retained.0
+            || RPC_ACTIVE.get() != Some(retained.1)
+            || method != 0x03299000
+            || input_count != 3
+            || output_count != 1
+        {
+            stop("Generic callback identity or counts differ from test request");
+        }
+        let mut payloads = Vec::new();
+        for (index, expected) in [8usize, 16, 100].into_iter().enumerate() {
+            let descriptor = read(inputs + index * 16, 16);
+            let pointer = usize::from_le_bytes(descriptor[..8].try_into().unwrap());
+            let length = usize::from_le_bytes(descriptor[8..].try_into().unwrap());
+            if length != expected {
+                stop("Generic native input descriptor length mismatch");
+            }
+            payloads.push(read(pointer, length));
+        }
+        let descriptor = read(outputs, 24);
+        let pointer = usize::from_le_bytes(descriptor[..8].try_into().unwrap());
+        let capacity = usize::from_le_bytes(descriptor[8..16].try_into().unwrap());
+        let mut expected_name = vec![0u8; 16];
+        expected_name[..10].copy_from_slice(b"PS4IpcTest");
+        if payloads[0] != 1u64.to_le_bytes()
+            || payloads[1] != expected_name
+            || payloads[2] != vec![0u8; 100]
+            || capacity != 4
+            || !can_access(pointer, capacity, true)
+        {
+            stop("Generic native callback bytes or output bounds mismatch");
+        }
+        event(
+            json!({"event":"native-generic-dispatch-verified","method_id":method,
+            "input_bytes":[8,16,100],"output_capacity":capacity,"exact_payload_match":true,
+            "callback_slot":0x10,"response_written":false,"original_logger_library_executed":false,
+            "original_shell_service":false,"authentic_dashboard_verified":false}),
+        );
+        if GENERIC_RESPOND_EXPORT.get() != 0 {
+            let payload = Block::new(4).unwrap_or_else(|e| stop(&e));
+            let descriptor = Block::new(24).unwrap_or_else(|e| stop(&e));
+            unsafe {
+                (payload.address as *mut u32).write_unaligned(0x12345678);
+                (descriptor.address as *mut usize).write_unaligned(payload.address as usize);
+                (descriptor.address.add(8) as *mut usize).write_unaligned(4);
+                (descriptor.address.add(16) as *mut usize).write_unaligned(if RPC_ERROR.get() {
+                    0
+                } else {
+                    4
+                });
+            }
+            let respond: unsafe extern "sysv64" fn(usize, i32, usize, u32) -> i32 =
+                unsafe { std::mem::transmute(GENERIC_RESPOND_EXPORT.get()) };
+            event(
+                json!({"event":"calling-native-generic-response","export_nid":"AYyxvDy-SFU",
+                "descriptor_fully_initialized":true,"synthetic_test_endpoint":true}),
+            );
+            let status = unsafe {
+                respond(
+                    session,
+                    if RPC_ERROR.get() { -123 } else { 0 },
+                    descriptor.address as usize,
+                    1,
+                )
+            };
+            event(json!({"event":"native-generic-response-returned","status":status}));
+            if !GENERIC_DELIVERY.get() || status != 0 {
+                stop("Generic response returned without verified delivery");
+            }
+            return 0;
+        }
+        stop("Generic native dispatch verified; reply ABI remains unsupported");
+    }
     // Eight arguments are required by the recovered native raw-buffer callback ABI.
     #[allow(clippy::too_many_arguments)]
     unsafe extern "sysv64" fn sync_test_callback(
@@ -1329,6 +1469,8 @@ mod native {
                     .write_unaligned(connection_test_callback as *const () as usize);
             }
             if RPC_ENABLED.get() {
+                (vtable.address.add(0x10) as *mut usize)
+                    .write_unaligned(generic_test_callback as *const () as usize);
                 (vtable.address.add(0x38) as *mut usize)
                     .write_unaligned(sync_test_callback as *const () as usize);
             }
@@ -1385,8 +1527,10 @@ mod native {
                 let context = DISPATCH.with(|d| *d.borrow());
                 let session_exports = SESSION_EXPORTS.with(|e| *e.borrow());
                 let request_probe = REQUEST_PROBE.get();
+                let multibuffer_probe = MULTIBUFFER_PROBE.get();
                 let rpc_enabled = RPC_ENABLED.get();
                 let rpc_error = RPC_ERROR.get();
+                let generic_delivery = GENERIC_DELIVERY.get();
                 std::thread::scope(|scope| {
                     let client = scope.spawn(move || {
                         // Parent allocations stay alive until this scoped thread joins.
@@ -1397,8 +1541,10 @@ mod native {
                         HANDSHAKE.set(true);
                         THREADED.set(true);
                         REQUEST_PROBE.set(request_probe);
+                        MULTIBUFFER_PROBE.set(multibuffer_probe);
                         RPC_ENABLED.set(rpc_enabled);
                         RPC_ERROR.set(rpc_error);
+                        GENERIC_DELIVERY.set(generic_delivery);
                         client_test(&functions, "--connect", b"PS4IpcTest\0")
                     });
                     channel()
@@ -1473,15 +1619,45 @@ mod native {
         if status != 0 {
             return Err("Native module initialization failed".into());
         }
-        if mode == "--threaded-rpc" || mode == "--threaded-rpc-error" {
+        GENERIC_DELIVERY.set(matches!(
+            mode,
+            "--threaded-multibuffer-rpc" | "--threaded-multibuffer-rpc-error"
+        ));
+        if matches!(
+            mode,
+            "--threaded-rpc"
+                | "--threaded-rpc-error"
+                | "--threaded-multibuffer-dispatch"
+                | "--threaded-multibuffer-reply-probe"
+        ) || GENERIC_DELIVERY.get()
+        {
             RPC_ENABLED.set(true);
             RESPOND_EXPORT.set(module.export("r0t1NxWUNwI")?);
         }
-        RPC_ERROR.set(mode == "--threaded-rpc-error");
+        RPC_ERROR.set(matches!(
+            mode,
+            "--threaded-rpc-error" | "--threaded-multibuffer-rpc-error"
+        ));
+        if mode == "--threaded-multibuffer-reply-probe" || GENERIC_DELIVERY.get() {
+            GENERIC_RESPOND_EXPORT.set(module.export("AYyxvDy-SFU")?);
+        }
+        MULTIBUFFER_PROBE.set(
+            matches!(
+                mode,
+                "--threaded-multibuffer-request"
+                    | "--threaded-multibuffer-dispatch"
+                    | "--threaded-multibuffer-reply-probe"
+            ) || GENERIC_DELIVERY.get(),
+        );
         if [
             "--handshake",
             "--threaded-handshake",
             "--threaded-request",
+            "--threaded-multibuffer-request",
+            "--threaded-multibuffer-dispatch",
+            "--threaded-multibuffer-reply-probe",
+            "--threaded-multibuffer-rpc",
+            "--threaded-multibuffer-rpc-error",
             "--threaded-rpc",
             "--threaded-rpc-error",
         ]
@@ -1489,10 +1665,13 @@ mod native {
         {
             HANDSHAKE.set(true);
         }
-        if mode == "--threaded-handshake" || mode == "--threaded-request" || RPC_ENABLED.get() {
+        if mode == "--threaded-handshake"
+            || (mode == "--threaded-request" || MULTIBUFFER_PROBE.get())
+            || RPC_ENABLED.get()
+        {
             THREADED.set(true);
         }
-        if mode == "--threaded-request" || RPC_ENABLED.get() {
+        if (mode == "--threaded-request" || MULTIBUFFER_PROBE.get()) || RPC_ENABLED.get() {
             REQUEST_PROBE.set(true);
         }
         if [
@@ -1503,6 +1682,11 @@ mod native {
             "--handshake",
             "--threaded-handshake",
             "--threaded-request",
+            "--threaded-multibuffer-request",
+            "--threaded-multibuffer-dispatch",
+            "--threaded-multibuffer-reply-probe",
+            "--threaded-multibuffer-rpc",
+            "--threaded-multibuffer-rpc-error",
             "--threaded-rpc",
             "--threaded-rpc-error",
         ]
@@ -1521,6 +1705,11 @@ mod native {
                     "--handshake",
                     "--threaded-handshake",
                     "--threaded-request",
+                    "--threaded-multibuffer-request",
+                    "--threaded-multibuffer-dispatch",
+                    "--threaded-multibuffer-reply-probe",
+                    "--threaded-multibuffer-rpc",
+                    "--threaded-multibuffer-rpc-error",
                     "--threaded-rpc",
                     "--threaded-rpc-error",
                 ]
@@ -1546,6 +1735,89 @@ mod native {
             json!({"event":"connected-session-destroyed","native_handle_invalidated":true,"status":status}),
         );
         Ok(())
+    }
+    // SystemLogger-shaped synthetic request through the original generic vtable
+    // entry. Deliberately stops at the unimplemented transport, without a reply.
+    fn multibuffer_request_probe(client: usize) {
+        let count = Block::new(8).unwrap_or_else(|e| stop(&e));
+        let name = Block::new(16).unwrap_or_else(|e| stop(&e));
+        let rows = Block::new(100).unwrap_or_else(|e| stop(&e));
+        let inputs = Block::new(48).unwrap_or_else(|e| stop(&e));
+        let outputs = Block::new(24).unwrap_or_else(|e| stop(&e));
+        let response = Block::new(36).unwrap_or_else(|e| stop(&e));
+        let result = Block::new(4).unwrap_or_else(|e| stop(&e));
+        unsafe {
+            std::ptr::write_bytes(response.address, 0xa5, 36);
+            (count.address as *mut u64).write_unaligned(1);
+            std::ptr::copy_nonoverlapping(b"PS4IpcTest".as_ptr(), name.address, 10);
+            for (index, (buffer, size)) in [
+                (count.address, 8usize),
+                (name.address, 16),
+                (rows.address, 100),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                (inputs.address.add(index * 16) as *mut usize).write_unaligned(buffer as usize);
+                (inputs.address.add(index * 16 + 8) as *mut usize).write_unaligned(size);
+            }
+            (outputs.address as *mut usize).write_unaligned(response.address as usize + 16);
+            (outputs.address.add(8) as *mut usize).write_unaligned(4);
+            (outputs.address.add(16) as *mut usize).write_unaligned(usize::MAX);
+            (result.address as *mut i32).write_unaligned(i32::MAX);
+        }
+        let vtable = usize::from_le_bytes(read(client, 8).try_into().unwrap());
+        let entry = usize::from_le_bytes(read(vtable + 0x58, 8).try_into().unwrap());
+        if !can_access(entry, 1, false) {
+            stop("Generic IPMI vtable entry is outside owned mappings");
+        }
+        let invoke: unsafe extern "sysv64" fn(usize, u32, usize, u32, usize, usize, u32) -> i32 =
+            unsafe { std::mem::transmute(entry) };
+        event(
+            json!({"event":"calling-native-multibuffer-method","method_id":0x03299000u32,
+            "vtable_slot":0x58,"input_bytes":[8,16,100],"output_capacities":[4],
+            "synthetic_test_endpoint":true,"original_logger_library_executed":false,
+            "original_shell_service":false,"authentic_dashboard_verified":false}),
+        );
+        let status = unsafe {
+            invoke(
+                client,
+                0x03299000,
+                inputs.address as usize,
+                3,
+                result.address as usize,
+                outputs.address as usize,
+                1,
+            )
+        };
+        if !GENERIC_DELIVERY.get() {
+            stop("Multi-buffer probe returned without verified service response");
+        }
+        let method_status =
+            i32::from_le_bytes(read(result.address as usize, 4).try_into().unwrap());
+        let length =
+            usize::from_le_bytes(read(outputs.address as usize + 16, 8).try_into().unwrap());
+        let expected_status = if RPC_ERROR.get() { -123 } else { 0 };
+        let expected_length = if RPC_ERROR.get() { 0 } else { 4 };
+        let guards = read(response.address as usize, 16) == vec![0xa5; 16]
+            && read(response.address as usize + 20, 16) == vec![0xa5; 16];
+        if status != 0
+            || method_status != expected_status
+            || length != expected_length
+            || !guards
+            || (length == 4
+                && read(response.address as usize + 16, 4) != 0x12345678u32.to_le_bytes())
+            || (length == 0 && read(response.address as usize + 16, 4) != vec![0xa5; 4])
+        {
+            stop("Generic native client result, length, payload or guard mismatch");
+        }
+        event(
+            json!({"event":"native-generic-roundtrip-verified","transport_status":status,
+            "method_status":method_status,"response_bytes":length,"exact_payload_match":true,
+            "guard_bytes_intact":guards,"empty_response_buffer_unchanged":length != 0 || read(response.address as usize+16,4)==vec![0xa5;4],
+            "synthetic_test_endpoint":true,"original_shell_service":false,
+            "original_logger_library_executed":false,"authentic_dashboard_verified":false}),
+        );
     }
     fn client_test(module: &ModuleFunctions, mode: &str, name: &[u8]) -> Result<(), String> {
         let config = Block::new(0x160)?;
@@ -1605,7 +1877,10 @@ mod native {
             if status != 0 || callback_status != 0 || COMPLETION.get() != Some((id, 0)) {
                 return Err("Native connection did not return verified completion".into());
             }
-            if REQUEST_PROBE.get() {
+            if MULTIBUFFER_PROBE.get() {
+                multibuffer_request_probe(pointer);
+            }
+            if REQUEST_PROBE.get() && !MULTIBUFFER_PROBE.get() {
                 let method_result = Block::new(4)?;
                 let response_bytes = Block::new(8)?;
                 let response = Block::new(48)?;
@@ -1802,13 +2077,18 @@ fn main() {
                         "--handshake",
                         "--threaded-handshake",
                         "--threaded-request",
+                        "--threaded-multibuffer-request",
+                        "--threaded-multibuffer-dispatch",
+                        "--threaded-multibuffer-reply-probe",
+                        "--threaded-multibuffer-rpc",
+                        "--threaded-multibuffer-rpc-error",
                         "--threaded-rpc",
                         "--threaded-rpc-error",
                     ]
                     .contains(&args[2].as_str()))
             {
                 return Err(
-                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-rpc|--threaded-rpc-error]".into(),
+                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-multibuffer-request|--threaded-multibuffer-dispatch|--threaded-multibuffer-reply-probe|--threaded-multibuffer-rpc|--threaded-multibuffer-rpc-error|--threaded-rpc|--threaded-rpc-error]".into(),
                 );
             }
             let dump = fs::canonicalize(&args[0]).map_err(|e| e.to_string())?;

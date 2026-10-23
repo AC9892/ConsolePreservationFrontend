@@ -11,6 +11,7 @@ pub struct Request {
     pub session_impl: u64,
     pub method: u32,
     pub input: Vec<u8>,
+    pub generic_inputs: Option<Vec<Vec<u8>>>,
     pub capacity: usize,
 }
 impl Request {
@@ -19,10 +20,17 @@ impl Request {
         bytes.extend(self.session_impl.to_le_bytes());
         bytes.extend(1u32.to_le_bytes()); // synthetic process identity
         bytes.extend(self.method.to_le_bytes());
+        bytes.extend((self.generic_inputs.as_ref().map_or(1, Vec::len) as u32).to_le_bytes());
         bytes.extend(1u32.to_le_bytes());
-        bytes.extend(1u32.to_le_bytes());
-        bytes.extend((self.input.len() as u32).to_le_bytes());
-        bytes.extend(&self.input);
+        if let Some(inputs) = &self.generic_inputs {
+            for input in inputs {
+                bytes.extend((input.len() as u32).to_le_bytes());
+                bytes.extend(input);
+            }
+        } else {
+            bytes.extend((self.input.len() as u32).to_le_bytes());
+            bytes.extend(&self.input);
+        }
         bytes.extend((self.capacity as u32).to_le_bytes());
         bytes
     }
@@ -54,6 +62,16 @@ impl Rpc {
             || request.caller_thread == 0
             || request.input.len() > 4096
             || request.capacity > 4096
+            || request.generic_inputs.as_ref().is_some_and(|inputs| {
+                inputs.is_empty()
+                    || inputs.len() > 10
+                    || !request.input.is_empty()
+                    || inputs.iter().any(|input| input.len() > 4096)
+                    || inputs
+                        .iter()
+                        .try_fold(0usize, |sum, input| sum.checked_add(input.len()))
+                        .is_none_or(|sum| sum > 4096)
+            })
         {
             return Err("Invalid or duplicate synthetic RPC request");
         }
@@ -145,8 +163,40 @@ mod tests {
             session_impl: 0x8000,
             method: 7,
             input: vec![1, 2],
+            generic_inputs: None,
             capacity: 4,
         }
+    }
+    #[test]
+    fn generic_packet_layout_and_native_count_bounds() {
+        let mut r = request();
+        r.input.clear();
+        r.generic_inputs = Some(vec![vec![1; 8], vec![2; 16], vec![3; 100]]);
+        let bytes = r.packet();
+        assert_eq!(bytes.len(), 164);
+        assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 3);
+        assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 8);
+        assert_eq!(&bytes[28..36], &[1; 8]);
+        assert_eq!(u32::from_le_bytes(bytes[36..40].try_into().unwrap()), 16);
+        assert_eq!(&bytes[40..56], &[2; 16]);
+        assert_eq!(u32::from_le_bytes(bytes[56..60].try_into().unwrap()), 100);
+        assert_eq!(&bytes[60..160], &[3; 100]);
+        assert_eq!(u32::from_le_bytes(bytes[160..164].try_into().unwrap()), 4);
+        Rpc::default().enqueue(r.clone()).unwrap();
+        for inputs in [
+            vec![],
+            vec![vec![]; 11],
+            vec![vec![0; 4097]],
+            vec![vec![0; 2049]; 2],
+        ] {
+            r.generic_inputs = Some(inputs);
+            assert!(Rpc::default().enqueue(r.clone()).is_err());
+        }
+        r.generic_inputs = Some(vec![vec![]; 10]);
+        Rpc::default().enqueue(r.clone()).unwrap();
+        r.input.push(1);
+        assert!(Rpc::default().enqueue(r).is_err());
     }
     #[test]
     fn packet_layout_and_response_identity_capacity() {

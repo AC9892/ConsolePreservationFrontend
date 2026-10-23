@@ -1,4 +1,4 @@
-# PS4 — experimental system software host
+# PS4 â€” experimental system software host
 
 Independent Windows application named **PS4.exe**, built with Rust and Tauri. The objective is incremental execution of authentic PlayStation 4 system software. No recreated dashboard or centralized console launcher is included.
 
@@ -10,7 +10,7 @@ Independent Windows application named **PS4.exe**, built with Rust and Tauri. Th
 - Check backend hashes and Windows memory availability; collect structured execution diagnostics.
 - Inspect local firmware read-only through PS4Inspector: SHA-256, file formats, SFO metadata, SCE imports/exports and dependency candidates.
 - Capture bounded debugger traces with PS4Trace.
-- Exercise original IPMI library code using PS4ModuleTest with explicitly synthetic diagnostic endpoints. Connection, session lifecycle, separate-thread request/reply, guarded buffers, error propagation and cleanup are checked.
+- Exercise original IPMI library code using PS4ModuleTest with explicitly synthetic diagnostic endpoints. Connection, session lifecycle, separate-thread raw and generic multi-buffer request/reply, guarded client buffers, error propagation and cleanup are checked. The generic test uses three synthetic inputs and one four-byte output; it does not execute the original SystemLogger library or service.
 
 Original ShellUI startup instructions have executed in controlled external-backend experiments, but missing IPMI transport and system services prevent a verified dashboard. The component IPMI transport is not integrated into shadPS4. A synthetic test handler is not an authentic ShellCore service.
 
@@ -39,9 +39,9 @@ The output parent must exist and reports must remain outside the dump. Native co
 
 ## Validation and remaining work
 
-At this checkpoint the release build, 31 tests and all-target Clippy passed. The local native component suite checked 19 workers against their expected success or deliberate unsupported-operation exits. Firmware-dependent evidence remains private and is not bundled.
+At this checkpoint the release build, 32 tests and all-target Clippy passed. The local native component suite checked 32 workers against their expected success or deliberate unsupported-operation exits. Firmware-dependent evidence remains private and is not bundled.
 
-Next work: verify SystemLogger multi-buffer IPMI encoding, implement supported contracts incrementally, identify authentic service providers and evaluate backend process/service integration. No successful firmware boot is claimed.
+Next work: load the original SystemLogger client library in a bounded component environment, resolve its allocation/mutex dependencies, identify authentic service providers and evaluate backend process/service integration. The current generic transport supports only the tested synthetic request shape. No successful firmware boot is claimed.
 
 ## Publication boundary
 
