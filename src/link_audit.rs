@@ -555,6 +555,7 @@ fn audit_target(path: &str) -> bool {
         "system/vsh/SceShellCore.elf",
         "system/common/lib/libSceSystemService.sprx",
         "system/common/lib/libSceIpmi.sprx",
+        "system/common/lib/libSceSystemLogger.sprx",
         "system/common/lib/libSceMbus.sprx",
         "system/common/lib/libScePsm.sprx",
         "system/common/lib/libSceRegMgr.sprx",
@@ -653,6 +654,11 @@ mod tests {
         assert!(!cleaned.contains("fake"));
         assert!(cleaned.contains("https://valid"));
         assert_eq!(source.lines().count(), cleaned.lines().count());
+    }
+    #[test]
+    fn system_logger_is_a_link_audit_target() {
+        assert!(audit_target("system/common/lib/libSceSystemLogger.sprx"));
+        assert!(!audit_target("system/common/lib/libSceUnknown.sprx"));
     }
     #[test]
     fn malformed_elf_tables_do_not_panic() {

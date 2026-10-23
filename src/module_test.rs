@@ -21,6 +21,7 @@ mod native {
         Diagnostics::Debug::FlushInstructionCache, Memory::*, Threading::GetCurrentProcess,
     };
     const HASH: &str = "c9081d79493740a55fc3d40e160e906c17879abeca47a9315188656113853ae5";
+    const LOGGER_HASH: &str = "817f9b8efa23e9693e712f5e5818a30505f81aa986a1e96870c3c3cec8f71ab0";
     static GUARD: u64 = 0x5a72183c992db467;
     static NEED_LIBC: u64 = 0;
     static MUTEXES: std::sync::Mutex<BTreeMap<usize, (u32, u32)>> =
@@ -71,6 +72,74 @@ mod native {
         static GENERIC_DELIVERY: Cell<bool> = const { Cell::new(false) };
         static REGION: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
         static IMPORTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        static LOGGER_ALLOCATOR: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_NEW: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_ALLOCATIONS: RefCell<BTreeMap<usize,Block>> = const { RefCell::new(BTreeMap::new()) };
+    }
+    // Diagnostic process-owned allocator, not a model of the PS4 libc heap.
+    // Page-rounded charges bound committed storage; mappings remain owned until
+    // worker exit because no original logger teardown has yet been verified.
+    unsafe extern "sysv64" fn logger_malloc(requested: usize) -> usize {
+        if !LOGGER_ALLOCATOR.get() {
+            stop("Logger allocator was not opted into");
+        }
+        const BUDGET: usize = 1024 * 1024;
+        let charge = requested.max(1).checked_add(4095).map(|v| v & !4095);
+        let allowed = LOGGER_ALLOCATIONS.with(|allocs| {
+            let allocs = allocs.borrow();
+            charge.is_some_and(|n| {
+                n <= BUDGET
+                    && allocs.len() < 32
+                    && allocs.values().map(|block| block.size).sum::<usize>() <= BUDGET - n
+            })
+        });
+        let block = if allowed {
+            Block::new(charge.unwrap()).ok()
+        } else {
+            None
+        };
+        match block {
+            Some(block) => {
+                let pointer = block.address as usize;
+                let count = LOGGER_ALLOCATIONS.with(|allocs| {
+                    let mut allocs = allocs.borrow_mut();
+                    allocs.insert(pointer, block);
+                    allocs.len()
+                });
+                event(
+                    json!({"event":"logger-owned-allocation","requested_bytes":requested,
+                    "charged_bytes":charge.unwrap(),"live_allocations":count,"synthetic_host_allocator":true}),
+                );
+                pointer
+            }
+            None => {
+                ERRNO.with(|e| unsafe { *e.get() = 12 });
+                event(
+                    json!({"event":"logger-owned-allocation-failed","requested_bytes":requested,"posix_errno":12}),
+                );
+                0
+            }
+        }
+    }
+    // Only successful throwing-new allocation is bridged. On failure we stop
+    // the controlled child, rather than return null or fabricate C++ unwinding.
+    unsafe extern "sysv64" fn logger_new(requested: usize) -> usize {
+        if !LOGGER_NEW.get() {
+            stop("Logger operator new was not opted into");
+        }
+        let pointer = unsafe { logger_malloc(requested) };
+        if pointer == 0 {
+            event(
+                json!({"event":"logger-operator-new-failure-unsupported","requested_bytes":requested,
+                "guest_exception_thrown":false,"null_returned_to_guest":false}),
+            );
+            stop("Throwing operator new failed; guest exception handling is unsupported");
+        }
+        event(
+            json!({"event":"logger-owned-operator-new","requested_bytes":requested,
+            "synthetic_host_allocator":true,"guest_exception_thrown":false}),
+        );
+        pointer
     }
     unsafe extern "sysv64" fn error_address() -> *mut i32 {
         ERRNO.with(|e| e.get())
@@ -943,17 +1012,20 @@ mod native {
     }
     #[derive(Clone)]
     struct Symbol {
+        encoded_name: String,
         name: String,
         value: u64,
         defined: bool,
         kind: u8,
     }
     struct Module {
+        hash: &'static str,
         image: Block,
         exports: BTreeMap<String, usize>,
         init: usize,
     }
     struct ModuleFunctions {
+        hash: &'static str,
         exports: BTreeMap<String, usize>,
         image_size: usize,
     }
@@ -967,6 +1039,22 @@ mod native {
     }
     impl Module {
         fn load(path: &Path) -> Result<Self, String> {
+            Self::load_pinned(path, HASH, None)
+        }
+        fn load_pinned(
+            path: &Path,
+            expected_hash: &'static str,
+            provider: Option<&ModuleFunctions>,
+        ) -> Result<Self, String> {
+            if expected_hash != HASH && expected_hash != LOGGER_HASH {
+                return Err("Unsupported native module profile".into());
+            }
+            if expected_hash == HASH && provider.is_some() {
+                return Err("IPMI profile does not accept another native provider".into());
+            }
+            if expected_hash == LOGGER_HASH && provider.is_none_or(|p| p.hash != HASH) {
+                return Err("Logger requires the original verified IPMI provider".into());
+            }
             let mut b = vec![];
             fs::File::open(path)
                 .map_err(|e| e.to_string())?
@@ -976,8 +1064,8 @@ mod native {
             if b.len() > 1024 * 1024 {
                 return Err("Native module exceeds test size bound".into());
             }
-            if format!("{:x}", Sha256::digest(&b)) != HASH {
-                return Err("Only the researched native IPMI module is accepted".into());
+            if format!("{:x}", Sha256::digest(&b)) != expected_hash {
+                return Err("Native module differs from the selected researched profile".into());
             }
             if !b.starts_with(b"\x7fELF\x02\x01") {
                 return Err("Expected ELF64".into());
@@ -1053,6 +1141,7 @@ mod native {
                     .ok_or("Unterminated symbol")?;
                 let name = String::from_utf8(tail[..end].to_vec()).map_err(|e| e.to_string())?;
                 let symbol = Symbol {
+                    encoded_name: name.clone(),
                     name: name.split('#').next().unwrap_or_default().into(),
                     value: number(&b, pos + 8, 8)?,
                     defined: number(&b, pos + 6, 2)? != 0,
@@ -1064,6 +1153,7 @@ mod native {
                 symbols.push(symbol);
             }
             let mut resolved = BTreeMap::new();
+            let mut linked = BTreeMap::new();
             let mut tramp_used = 0;
             for (address_tag, size_tag) in [(0x6100002f, 0x61000031), (0x61000029, 0x6100002d)] {
                 let start = data + tag(address_tag)?;
@@ -1084,10 +1174,38 @@ mod native {
                                 .ok_or("Invalid relocation symbol")?;
                             let pointer = if symbol.defined {
                                 base + symbol.value as usize
+                            } else if let Some(value) =
+                                provider.and_then(|p| p.exports.get(&symbol.name))
+                            {
+                                if expected_hash != LOGGER_HASH
+                                    || !["0zsTiDhM0nU#B#C", "O1lQ2+do5r4#B#C", "Rih7HnIM3JQ#B#C"]
+                                        .contains(&symbol.encoded_name.as_str())
+                                {
+                                    return Err("Original IPMI link is outside the pinned full-key allowlist".into());
+                                }
+                                if symbol.kind != 2 {
+                                    return Err(
+                                        "Only function imports may link to the IPMI provider"
+                                            .into(),
+                                    );
+                                }
+                                linked.insert(symbol.name.clone(), *value);
+                                *value
                             } else if let Some(value) = resolved.get(&symbol.name) {
                                 *value
                             } else {
                                 let value = match symbol.name.as_str() {
+                                    "fJnpuVVBbKk"
+                                        if expected_hash == LOGGER_HASH && LOGGER_NEW.get() =>
+                                    {
+                                        logger_new as *const () as usize
+                                    }
+                                    "gQX+4GDQjpM"
+                                        if expected_hash == LOGGER_HASH
+                                            && LOGGER_ALLOCATOR.get() =>
+                                    {
+                                        logger_malloc as *const () as usize
+                                    }
                                     "Hk7iHmGxB18" => transport as *const () as usize,
                                     "aesyjrHVWy4" => compare as *const () as usize,
                                     "eLdDw6l0-bU" => format_name as *const () as usize,
@@ -1184,11 +1302,26 @@ mod native {
             unsafe {
                 FlushInstructionCache(GetCurrentProcess(), image.address as *const _, image.size);
             }
-            let init = base + tags.get(&12).copied().unwrap_or_default();
+            // DT_INIT is module-relative: offset zero is a valid executable
+            // entry in these pinned PS4 modules, not a null host pointer.
+            let init_offset = tag(12)?;
+            if init_offset >= tramp_start
+                || !segments.iter().any(|(kind, flags, _, va, file, _)| {
+                    *kind == 1
+                        && flags & 1 != 0
+                        && init_offset
+                            .checked_sub(*va)
+                            .is_some_and(|offset| offset < *file)
+                })
+            {
+                return Err("Module init outside image".into());
+            }
+            let init = base + init_offset;
             event(
-                json!({"event":"module-loaded","sha256":HASH,"image_bytes":image.size,"image_base":format!("0x{base:x}"),"import_bindings":resolved.len(),"fail_stop_function_imports":tramp_used/22,"implemented_function_nids":["Hk7iHmGxB18","aesyjrHVWy4","eLdDw6l0-bU","cmo1RIYva9o","2Of0f+3mhhE","7H0iTOciTLo","2Z+PpY6CaJg","9BcDykPmo1I","D4yla3vx4tY","EI-5-jlq2dE","igMefp4SAv0"],"export_count":exports.len()}),
+                json!({"event":"module-loaded","sha256":expected_hash,"linked_original_function_nids":linked.keys().collect::<Vec<_>>(),"has_module_init":init!=0,"image_bytes":image.size,"image_base":format!("0x{base:x}"),"import_bindings":resolved.len(),"fail_stop_function_imports":tramp_used/22,"implemented_function_nids":["Hk7iHmGxB18","aesyjrHVWy4","eLdDw6l0-bU","cmo1RIYva9o","2Of0f+3mhhE","7H0iTOciTLo","2Z+PpY6CaJg","9BcDykPmo1I","D4yla3vx4tY","EI-5-jlq2dE","igMefp4SAv0"],"export_count":exports.len()}),
             );
             Ok(Self {
+                hash: expected_hash,
                 image,
                 exports,
                 init,
@@ -1202,6 +1335,7 @@ mod native {
         }
         fn functions(&self) -> ModuleFunctions {
             ModuleFunctions {
+                hash: self.hash,
                 exports: self.exports.clone(),
                 image_size: self.image.size,
             }
@@ -1619,6 +1753,51 @@ mod native {
         if status != 0 {
             return Err("Native module initialization failed".into());
         }
+        if mode == "--logger-new-failure" {
+            LOGGER_ALLOCATOR.set(true);
+            LOGGER_NEW.set(true);
+            event(
+                json!({"event":"calling-synthetic-throwing-new-failure","original_logger_library_executed":false}),
+            );
+            unsafe {
+                logger_new(usize::MAX);
+            }
+            stop("Throwing-new failure probe unexpectedly returned");
+        }
+        if matches!(
+            mode,
+            "--logger-initialize" | "--logger-allocate" | "--logger-new"
+        ) {
+            LOGGER_ALLOCATOR.set(mode != "--logger-initialize");
+            LOGGER_NEW.set(mode == "--logger-new");
+            let provider = module.functions();
+            let logger = Module::load_pinned(
+                &path.with_file_name("libSceSystemLogger.sprx"),
+                LOGGER_HASH,
+                Some(&provider),
+            )?;
+            let logger_init: unsafe extern "sysv64" fn(u64, usize, usize) -> i32 =
+                unsafe { std::mem::transmute(logger.init) };
+            event(json!({"event":"calling-original-logger-module-init","sha256":LOGGER_HASH}));
+            let init_status = unsafe { logger_init(0, 0, 0) };
+            event(json!({"event":"original-logger-module-init-returned","status":init_status}));
+            if init_status != 0 {
+                return Err("Original logger module-init failed".into());
+            }
+            let initialize: unsafe extern "sysv64" fn() -> i32 =
+                unsafe { std::mem::transmute(logger.export("EwC6IQrXGoY")?) };
+            event(
+                json!({"event":"calling-original-logger-initialize","sha256":LOGGER_HASH,
+                "original_logger_initialize_attempt":true,"original_shell_service":false,
+                "authentic_dashboard_verified":false}),
+            );
+            let status = unsafe { initialize() };
+            event(
+                json!({"event":"original-logger-initialize-returned","status":status,
+                "authentic_dashboard_verified":false}),
+            );
+            stop("Original logger initialize returned; service execution remains unverified");
+        }
         GENERIC_DELIVERY.set(matches!(
             mode,
             "--threaded-multibuffer-rpc" | "--threaded-multibuffer-rpc-error"
@@ -2027,6 +2206,75 @@ mod native {
             }
         }
         #[test]
+        fn logger_allocator_owns_aligned_bounded_mappings() {
+            LOGGER_ALLOCATOR.set(true);
+            LOGGER_ALLOCATIONS.with(|a| assert!(a.borrow().is_empty()));
+            let first = unsafe { logger_malloc(17) };
+            let zero = unsafe { logger_malloc(0) };
+            assert_ne!(first, 0);
+            assert_ne!(zero, 0);
+            assert_ne!(first, zero);
+            assert_eq!(first % 16, 0);
+            assert!(can_access(first, 17, true));
+            unsafe { (first as *mut u8).write(0x5a) };
+            assert_eq!(read(first, 1), vec![0x5a]);
+            assert_eq!(unsafe { logger_malloc(usize::MAX) }, 0);
+            assert_eq!(unsafe { logger_malloc(1024 * 1024) }, 0);
+            assert_eq!(unsafe { *error_address() }, 12);
+            LOGGER_ALLOCATIONS.with(|a| assert_eq!(a.borrow().len(), 2));
+            for _ in 0..30 {
+                assert_ne!(unsafe { logger_malloc(1) }, 0);
+            }
+            assert_eq!(unsafe { logger_malloc(1) }, 0);
+            LOGGER_ALLOCATIONS.with(|a| assert_eq!(a.borrow().len(), 32));
+            LOGGER_ALLOCATIONS.with(|a| a.borrow_mut().clear());
+            assert!(!can_access(first, 1, false));
+            LOGGER_ALLOCATOR.set(false);
+        }
+        #[test]
+        fn logger_operator_new_success_preserves_owned_allocation_contract() {
+            LOGGER_ALLOCATOR.set(true);
+            LOGGER_NEW.set(true);
+            LOGGER_ALLOCATIONS.with(|a| assert!(a.borrow().is_empty()));
+            let pointer = unsafe { logger_new(8) };
+            assert_ne!(pointer, 0);
+            assert_eq!(pointer % 16, 0);
+            assert!(can_access(pointer, 8, true));
+            let zero = unsafe { logger_new(0) };
+            assert_ne!(zero, 0);
+            assert_ne!(pointer, zero);
+            LOGGER_ALLOCATIONS.with(|a| assert_eq!(a.borrow().len(), 2));
+            LOGGER_ALLOCATIONS.with(|a| a.borrow_mut().clear());
+            assert!(!can_access(pointer, 1, false));
+            LOGGER_NEW.set(false);
+            LOGGER_ALLOCATOR.set(false);
+        }
+        #[test]
+        fn native_profile_provider_requirements_fail_before_file_access() {
+            let absent = Path::new("not-a-module.synthetic");
+            assert!(Module::load_pinned(absent, "unverified", None)
+                .err()
+                .unwrap()
+                .contains("Unsupported native module profile"));
+            assert!(Module::load_pinned(absent, LOGGER_HASH, None)
+                .err()
+                .unwrap()
+                .contains("verified IPMI provider"));
+            let wrong = ModuleFunctions {
+                hash: LOGGER_HASH,
+                exports: BTreeMap::new(),
+                image_size: 0,
+            };
+            assert!(Module::load_pinned(absent, LOGGER_HASH, Some(&wrong))
+                .err()
+                .unwrap()
+                .contains("verified IPMI provider"));
+            assert!(Module::load_pinned(absent, HASH, Some(&wrong))
+                .err()
+                .unwrap()
+                .contains("does not accept"));
+        }
+        #[test]
         fn import_memory_access_stays_in_owned_writable_ranges() {
             let block = Block::new(4096).unwrap();
             let address = block.address as usize;
@@ -2070,6 +2318,10 @@ fn main() {
                 || (args.len() == 3
                     && ![
                         "--connect",
+                        "--logger-initialize",
+                        "--logger-allocate",
+                        "--logger-new",
+                        "--logger-new-failure",
                         "--server",
                         "--server-connect",
                         "--server-dispatch",
@@ -2088,7 +2340,7 @@ fn main() {
                     .contains(&args[2].as_str()))
             {
                 return Err(
-                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-multibuffer-request|--threaded-multibuffer-dispatch|--threaded-multibuffer-reply-probe|--threaded-multibuffer-rpc|--threaded-multibuffer-rpc-error|--threaded-rpc|--threaded-rpc-error]".into(),
+                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--logger-initialize|--logger-allocate|--logger-new|--logger-new-failure|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-multibuffer-request|--threaded-multibuffer-dispatch|--threaded-multibuffer-reply-probe|--threaded-multibuffer-rpc|--threaded-multibuffer-rpc-error|--threaded-rpc|--threaded-rpc-error]".into(),
                 );
             }
             let dump = fs::canonicalize(&args[0]).map_err(|e| e.to_string())?;
