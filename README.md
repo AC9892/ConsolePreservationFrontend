@@ -1,44 +1,48 @@
-X leaking my progess lol
+# PS4 — experimental system software host
 
-# ConsolePreservationFrontend (CPF)
+Independent Windows application named **PS4.exe**, built with Rust and Tauri. The objective is incremental execution of authentic PlayStation 4 system software. No recreated dashboard or centralized console launcher is included.
 
-CPF is a proposed frontend for preserving and reconstructing console environments. This repository currently contains design documentation only. It does not contain a working application, preservation backend, or portable package format.
+**Authentic dashboard execution and rendering remain unverified.** This source snapshot is experimental development work, not a working PS4 system emulator.
 
-## Purpose
+## Current behavior
 
-Give users a way to inspect, organize, and eventually reconstruct the recorded state of a console environment, including context beyond a single game executable.
+- Select local dump and pinned external shadPS4 executable paths; prepare a fresh writable copy and attempt a bounded ShellUI launch.
+- Check backend hashes and Windows memory availability; collect structured execution diagnostics.
+- Inspect local firmware read-only through PS4Inspector: SHA-256, file formats, SFO metadata, SCE imports/exports and dependency candidates.
+- Capture bounded debugger traces with PS4Trace.
+- Exercise original IPMI library code using PS4ModuleTest with explicitly synthetic diagnostic endpoints. Connection, session lifecycle, separate-thread request/reply, guarded buffers, error propagation and cleanup are checked.
 
-## Core concept
+Original ShellUI startup instructions have executed in controlled external-backend experiments, but missing IPMI transport and system services prevent a verified dashboard. The component IPMI transport is not integrated into shadPS4. A synthetic test handler is not an authentic ShellCore service.
 
-The frontend would present records for console storage, firmware information, hardware profiles, configuration, metadata, saves, snapshots, and other reconstructable state. It should distinguish captured data, descriptive metadata, and references to material the user must supply separately.
+## Build
 
-## Example use cases
+Windows 11, Rust MSVC, Visual Studio C++ Build Tools and WebView2 are required.
 
-- Review an archived console configuration and save history.
-- Compare a preserved hardware or firmware profile with a target environment.
-- Prepare a preservation package for import by a compatible tool.
+```powershell
+./build-release.ps1
+cargo clippy --release --all-targets --locked -- -D warnings
+```
 
-These are proposed workflows, not implemented features.
+The build script builds/tests and copies PS4.exe, PS4Inspector.exe, PS4Trace.exe and PS4ModuleTest.exe to dist. No Node development server is needed. Source code and dependency declarations are provided; third-party runtimes and backend executables must be obtained separately under their licenses.
 
-## High-level architecture
+## Local use
 
-CPF would be a user interface above a separate preservation data layer. The data layer would define manifests, provenance, integrity checks, and import/export behavior; CPF would display and validate those records and guide compatible restore workflows. Optional adapters could connect preservation records to existing emulators. A portable container format may be specified later; no container schema or extension is established by this repository.
+Open dist/PS4.exe and choose your dump root, verified external backend and writable sandbox parent outside the dump. Dumps are opened for reading; execution uses copied files. This copy boundary is not an OS security sandbox. Prepared networking flags are disabled, but this is not OS-enforced network isolation. Attempts are bounded to 20 seconds.
 
-## Current status
+```powershell
+./dist/PS4Inspector.exe DUMP_ROOT --output NEW_REPORT_PATH
+./tools/test-native-ipmi.ps1 -DumpRoot DUMP_ROOT
+python tools/analyze_logger_contract.py PATH_TO_LOCAL_SYSTEMLOGGER_MODULE
+```
 
-**Experimental design.** This repository contains a README, not frontend code. Capture, import, export, package validation, and reconstruction are not available here.
+The output parent must exist and reports must remain outside the dump. Native component experiments accept an exact researched module hash and execute private native mappings; they are not safe isolation for hostile code. Optional Python research tools use separately installed Capstone/pefile from local/python-tools.
 
-## Planned features
+## Validation and remaining work
 
-- Inspectable manifests for hardware, firmware information, configuration, and storage.
-- Save and snapshot browsing with provenance and integrity information.
-- Import/export and package validation interfaces.
-- Compatibility checks for optional emulator adapters.
-- Clear reporting of missing user-supplied materials during reconstruction.
+At this checkpoint the release build, 31 tests and all-target Clippy passed. The local native component suite checked 19 workers against their expected success or deliberate unsupported-operation exits. Firmware-dependent evidence remains private and is not bundled.
 
-## Relationship to the other frameworks
+Next work: verify SystemLogger multi-buffer IPMI encoding, implement supported contracts incrementally, identify authentic service providers and evaluate backend process/service integration. No successful firmware boot is claimed.
 
-CPF concerns console preservation workflows. [GameBridge](https://github.com/AC9892/GameBridge-Framework) concerns game-to-game translation, [VME/VMBridge](https://github.com/AC9892/VM-EmbedingFramework) concerns embedded virtual machines, and EmuFrame concerns emulator integration. Any connection would be optional and use explicit adapters or documented interfaces.
+## Publication boundary
 
-CPF must not include copyrighted firmware, games, keys, or other proprietary content. Users must supply any required material through lawful channels supported by the relevant tools.
-
+Only original source, configuration, synthetic fixtures and sanitized documentation are included. Firmware, games, keys, accounts, raw logs, dump inventories, private checkpoints, Agent Talk, backend sources and binaries are excluded. No compiled release is published with this snapshot. See [third-party notes](THIRD_PARTY.md) and [dependency metadata](docs/DEPENDENCY_LICENSES.tsv).

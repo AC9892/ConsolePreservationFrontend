@@ -1,0 +1,76 @@
+/target/
+/reports/
+/local/
+/dist/
+*.log
+*.bin
+*.self
+*.sprx
+*.prx
+*.elf
+*.pkg
+*.pup
+*.sfo
+/gen/
+/shadPS4/
+__pycache__/
+*.pyc
+
+# Git internals
+**/.git/**
+
+# Rust build outputs
+**/target/**
+**/debug/**
+**/release/**
+
+# JavaScript / Tauri generated files
+**/node_modules/**
+**/dist/**
+**/build/**
+**/gen/**
+**/.turbo/**
+**/.cache/**
+
+# Downloaded third-party source trees
+**/local/backend-source-*/**
+**/local/shadPS4/**
+**/vendor/**
+
+# PS4 firmware and raw device dumps
+**/*.bin
+**/*.self
+**/*.sprx
+**/*.pkg
+**/*.pup
+**/*.iso
+**/*.img
+
+# Archives
+**/*.zip
+**/*.7z
+**/*.rar
+**/*.tar
+
+# Sensitive console data, including Sys Copy and personal paths
+**/KLog/**
+**/Dumps/**
+**/Backups/**
+**/Trophies/**
+**/Saves/**
+**/system_data/**
+**/Sys Copy/**
+
+# Secrets and credentials
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+
+# Temporary files
+**/*.tmp
+**/*.bak
+**/*.log
+
+# Private local agent coordination
+**/Agent Talk/

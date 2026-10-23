@@ -1,0 +1,41 @@
+[package]
+name = "ps4-preservation"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "PS4"
+path = "src/main.rs"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "dep:rfd"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+walkdir = "2"
+regex = "1"
+tauri = { version = "2", optional = true, features = ["config-toml", "custom-protocol"] }
+rfd = { version = "0.15", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", features = ["config-toml"] }
+
+
+[[bin]]
+name = "PS4Inspector"
+path = "src/inspector_cli.rs"
+
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_System_Kernel", "Win32_System_SystemInformation", "Win32_System_Memory", "Win32_System_ProcessStatus"] }
+
+[[bin]]
+name = "PS4Trace"
+path = "src/trace_cli.rs"
+
+[[bin]]
+name = "PS4ModuleTest"
+path = "src/module_test.rs"

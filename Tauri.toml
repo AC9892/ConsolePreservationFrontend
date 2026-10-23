@@ -1,0 +1,22 @@
+productName = "PS4"
+version = "0.1.0"
+identifier = "org.preservation.ps4"
+
+[build]
+frontendDist = "web"
+
+[app]
+withGlobalTauri = true
+
+[[app.windows]]
+title = "PS4 — System Software Host"
+width = 1280
+height = 850
+minWidth = 900
+minHeight = 600
+
+[app.security]
+csp = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost"
+
+[bundle]
+active = false
