@@ -12,6 +12,8 @@ Original SystemLogger module initialization returns zero. Its public initialize 
 - `--logger-allocate`: services one 4096-byte malloc request, then explicitly stops at missing operator new (`fJnpuVVBbKk`).
 - `--logger-new`: services the 4096-byte malloc and an 8-byte operator-new request, then explicitly stops at missing strncpy (`6sJWiWSRuqk`).
 
+- `--logger-copy`: additionally completes one bounded 32-byte strncpy call (27 source bytes examined), then explicitly stops at missing scePthreadMutexattrInit (`F8bUHwAG284`).
+
 These modes exit 86 at their deliberate unsupported-import boundary; producing a report is not successful initialization. Source module mappings and allocator outputs are private process-owned copies. Original dump files are never opened for writing.
 
 ## Diagnostic allocator limits
@@ -22,6 +24,10 @@ The original throwing operator-new caller passes the returned pointer directly t
 
 Allocation mappings are retained until worker exit. Matching free/delete and original logger cleanup have not been established. This is a bounded diagnostic allocator, not a PS4 heap implementation. Earlier synthetic raw/generic IPMI tests remain independent transport checks, not authentic service implementations.
 
+## Bounded string copy
+
+The opt-in strncpy bridge accepts at most 256 bytes, validates the complete writable destination, reads only through the source NUL or count, implements truncation and zero padding, and rejects overlapping copies. Inputs are checked before any destination writes. Zero count performs no pointer access. Guard, invalid-memory, padding and mapping-boundary tests cover the bridge.
+
 ## Next work
 
-Resolve the measured strncpy dependency with bounded pointer/length semantics, then capture the next concrete failure. Establish matching allocation/deallocation ownership and mutex attributes before claiming successful logger cleanup. Independently review each added contract and preserve deliberate failure probes. Backend integration and authentic service providers remain unresolved.
+Determine and implement only the supported mutex-attribute storage, lifetime and default semantics, then capture the next concrete failure. Establish matching allocation/deallocation ownership and mutex attributes before claiming successful logger cleanup. Independently review each added contract and preserve deliberate failure probes. Backend integration and authentic service providers remain unresolved.

@@ -74,6 +74,7 @@ mod native {
         static IMPORTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
         static LOGGER_ALLOCATOR: Cell<bool> = const { Cell::new(false) };
         static LOGGER_NEW: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_COPY: Cell<bool> = const { Cell::new(false) };
         static LOGGER_ALLOCATIONS: RefCell<BTreeMap<usize,Block>> = const { RefCell::new(BTreeMap::new()) };
     }
     // Diagnostic process-owned allocator, not a model of the PS4 libc heap.
@@ -140,6 +141,63 @@ mod native {
             "synthetic_host_allocator":true,"guest_exception_thrown":false}),
         );
         pointer
+    }
+    fn checked_strncpy(
+        destination: usize,
+        source: usize,
+        count: usize,
+    ) -> Result<usize, &'static str> {
+        if count > 256 {
+            return Err("strncpy count exceeds probe bound");
+        }
+        if count == 0 {
+            return Ok(0);
+        }
+        if !can_access(destination, count, true) {
+            return Err("strncpy destination is not owned writable memory");
+        }
+        let mut bytes = vec![0u8; count];
+        let mut examined = 0;
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            let address = source
+                .checked_add(index)
+                .ok_or("strncpy source address overflow")?;
+            if !can_access(address, 1, false) {
+                return Err("strncpy source is outside readable probe memory");
+            }
+            *byte = unsafe { (address as *const u8).read() };
+            examined += 1;
+            if *byte == 0 {
+                break;
+            }
+        }
+        let source_end = source
+            .checked_add(examined)
+            .ok_or("strncpy source extent overflow")?;
+        let destination_end = destination
+            .checked_add(count)
+            .ok_or("strncpy destination extent overflow")?;
+        if source < destination_end && destination < source_end {
+            return Err("Overlapping strncpy is unsupported");
+        }
+        // All reads and bounds checks finish before any destination write.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), destination as *mut u8, count) };
+        Ok(examined)
+    }
+    unsafe extern "sysv64" fn logger_strncpy(
+        destination: usize,
+        source: usize,
+        count: usize,
+    ) -> usize {
+        if !LOGGER_COPY.get() {
+            stop("Logger strncpy was not opted into");
+        }
+        let examined = checked_strncpy(destination, source, count).unwrap_or_else(|e| stop(e));
+        event(
+            json!({"event":"logger-bounded-strncpy","count":count,"source_bytes_examined":examined,
+            "bounded_host_bridge":true}),
+        );
+        destination
     }
     unsafe extern "sysv64" fn error_address() -> *mut i32 {
         ERRNO.with(|e| e.get())
@@ -1195,6 +1253,11 @@ mod native {
                                 *value
                             } else {
                                 let value = match symbol.name.as_str() {
+                                    "6sJWiWSRuqk"
+                                        if expected_hash == LOGGER_HASH && LOGGER_COPY.get() =>
+                                    {
+                                        logger_strncpy as *const () as usize
+                                    }
                                     "fJnpuVVBbKk"
                                         if expected_hash == LOGGER_HASH && LOGGER_NEW.get() =>
                                     {
@@ -1766,10 +1829,11 @@ mod native {
         }
         if matches!(
             mode,
-            "--logger-initialize" | "--logger-allocate" | "--logger-new"
+            "--logger-initialize" | "--logger-allocate" | "--logger-new" | "--logger-copy"
         ) {
             LOGGER_ALLOCATOR.set(mode != "--logger-initialize");
-            LOGGER_NEW.set(mode == "--logger-new");
+            LOGGER_NEW.set(mode == "--logger-new" || mode == "--logger-copy");
+            LOGGER_COPY.set(mode == "--logger-copy");
             let provider = module.functions();
             let logger = Module::load_pinned(
                 &path.with_file_name("libSceSystemLogger.sprx"),
@@ -2250,6 +2314,51 @@ mod native {
             LOGGER_ALLOCATOR.set(false);
         }
         #[test]
+        fn strncpy_padding_truncation_and_guards() {
+            let source = Block::new(4096).unwrap();
+            let dest = Block::new(32).unwrap();
+            unsafe {
+                std::ptr::copy_nonoverlapping(c"cat".as_ptr().cast::<u8>(), source.address, 4);
+                std::ptr::write_bytes(dest.address, 0xa5, 32);
+            }
+            assert_eq!(
+                checked_strncpy(dest.address as usize + 8, source.address as usize, 8),
+                Ok(4)
+            );
+            assert_eq!(read(dest.address as usize + 8, 8), b"cat\0\0\0\0\0");
+            assert_eq!(read(dest.address as usize, 8), vec![0xa5; 8]);
+            assert_eq!(read(dest.address as usize + 16, 16), vec![0xa5; 16]);
+            assert_eq!(
+                checked_strncpy(dest.address as usize + 8, source.address as usize, 2),
+                Ok(2)
+            );
+            assert_eq!(read(dest.address as usize + 8, 2), b"ca");
+            // A NUL at the last owned byte must not require further source reads.
+            assert_eq!(
+                checked_strncpy(dest.address as usize, source.address as usize + 4095, 32),
+                Ok(1)
+            );
+            assert_eq!(read(dest.address as usize, 32), vec![0; 32]);
+        }
+        #[test]
+        fn strncpy_invalid_inputs_leave_destination_unchanged() {
+            let dest = Block::new(32).unwrap();
+            unsafe { std::ptr::write_bytes(dest.address, 0xa5, 32) };
+            let address = dest.address as usize;
+            assert_eq!(checked_strncpy(usize::MAX, 0, 0), Ok(0));
+            assert!(checked_strncpy(address, 0, 8).is_err());
+            assert!(checked_strncpy(address, address, 8).is_err());
+            assert!(checked_strncpy(address, address, usize::MAX).is_err());
+            assert_eq!(read(address, 32), vec![0xa5; 32]);
+            let mut old = 0;
+            assert_ne!(
+                unsafe { VirtualProtect(dest.address as *const _, 32, PAGE_READONLY, &mut old) },
+                0
+            );
+            assert!(checked_strncpy(address, address, 8).is_err());
+            assert_eq!(read(address, 32), vec![0xa5; 32]);
+        }
+        #[test]
         fn native_profile_provider_requirements_fail_before_file_access() {
             let absent = Path::new("not-a-module.synthetic");
             assert!(Module::load_pinned(absent, "unverified", None)
@@ -2321,6 +2430,7 @@ fn main() {
                         "--logger-initialize",
                         "--logger-allocate",
                         "--logger-new",
+                        "--logger-copy",
                         "--logger-new-failure",
                         "--server",
                         "--server-connect",
@@ -2340,7 +2450,7 @@ fn main() {
                     .contains(&args[2].as_str()))
             {
                 return Err(
-                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--logger-initialize|--logger-allocate|--logger-new|--logger-new-failure|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-multibuffer-request|--threaded-multibuffer-dispatch|--threaded-multibuffer-reply-probe|--threaded-multibuffer-rpc|--threaded-multibuffer-rpc-error|--threaded-rpc|--threaded-rpc-error]".into(),
+                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--logger-initialize|--logger-allocate|--logger-new|--logger-copy|--logger-new-failure|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-multibuffer-request|--threaded-multibuffer-dispatch|--threaded-multibuffer-reply-probe|--threaded-multibuffer-rpc|--threaded-multibuffer-rpc-error|--threaded-rpc|--threaded-rpc-error]".into(),
                 );
             }
             let dump = fs::canonicalize(&args[0]).map_err(|e| e.to_string())?;
