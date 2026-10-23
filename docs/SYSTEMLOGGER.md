@@ -39,3 +39,15 @@ The current concrete boundary is a missing authentic service provider, not a suc
 `tools/analyze_logger_provider.py ORIGINAL_SHELLCORE` records hash-pinned static provider startup evidence as JSON on stdout. It verifies server creation at module-relative `0x4f2938`, worker entry `0x4f2ea0` calling server vtable slot `+0x10`, and the internal thread-setup wrapper. The original setup requests a 32768-byte stack and scheduling parameter 766 and imports PS4 thread attribute, scheduling, creation and exit APIs. Raw instruction reports belong outside the dump and must remain private.
 
 Establish callback registration, prerequisite global state and process-entry reachability before attempting an original provider probe. Preserve process identity and backend IPC boundaries; a synthetic server or separately started host process does not establish an authentic provider. Kernel mutex semantics, backend integration, service execution and dashboard execution remain unresolved.
+
+## Provider construction evidence
+
+The analyzer now follows the original module initialization table to the logger callback constructor. A bounded legacy table has 262 slots before its sentinel; one entry points to the constructor that installs the callback table and requests a 48-byte allocation. Seven local callback targets and the constructor entry have eight verified relative relocations. Table membership does not prove that preceding constructors complete. The worker separately requires a valid server pointer, temporary working-memory pointer and its size.
+
+The analyzer verifies the parsed snapshot's hash as well as the initial read, refusing changed input between reads. It checks both service-name fragment loads and reads file-backed SCE RELRO without inventing BSS contents. Six synthetic checks cover these integrity and memory-boundary properties without console fixtures:
+
+```powershell
+python -m unittest discover -s tools -p test_logger_provider.py
+```
+
+The optional Capstone analysis dependency is required. Original server, constructor and method execution remain unverified. The next backend investigation should retain the original IPMI library and target its measured `ipmimgr_call` kernel boundary (NID `Hk7iHmGxB18`), with explicit ownership, guest-memory validation and separate transport/error-result channels. Missing HLE C++ APIs alone do not justify replacing the original client/server library.

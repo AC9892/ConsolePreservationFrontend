@@ -28,6 +28,44 @@ foreach ($mode in $modes) {
     $events = @(Get-Content -LiteralPath $report.events | ForEach-Object { $_ | ConvertFrom-Json })
     $expected = if ($mode -in @('', '--server','--handshake','--threaded-handshake','--threaded-rpc','--threaded-rpc-error','--threaded-multibuffer-rpc','--threaded-multibuffer-rpc-error')) { 0 } else { 86 }
     if ($report.exit_code -ne $expected -or $report.timed_out -or $report.authentic_dashboard_verified) { throw "Unexpected worker result: $mode" }
+    if ($mode -eq '--connect') {
+        $lookup = @($events | Where-Object event -eq 'native-connection-server-lookup')
+        $unsupported = @($events | Where-Object event -eq 'unsupported-ipmi-operation')
+        $failure = @($events | Where-Object event -eq 'failure')
+        if (@($events | Where-Object event -eq 'ipmi-server-registered').Count -ne 0 -or $lookup.Count -ne 1 -or $lookup[0].lookup_error -ne 'ServerNotFound' -or $lookup[0].server_handle -ne $null -or $lookup[0].session_created) { throw 'Client-only connect must stop at the missing-server lookup' }
+        if ($unsupported.Count -ne 1 -or $unsupported[0].operation -ne 0x400 -or $failure.Count -ne 1 -or $failure[0].reason -ne 'Unsupported IPMI operation 0x400; no success response fabricated' -or @($events | Where-Object event -eq 'native-connection-completion-accepted').Count -ne 0) { throw 'Client-only connect must not fabricate connection completion' }
+    }
+    if ($mode -in @('--server','--server-connect','--server-dispatch','--server-session')) {
+        $registered = @($events | Where-Object event -eq 'ipmi-server-registered')
+        if ($registered.Count -ne 1 -or $registered[0].service -ne 'PS4IpcTest' -or !$registered[0].synthetic_test_endpoint -or $registered[0].original_shell_service) { throw "Expected synthetic test server registration missing: $mode" }
+    }
+    if ($mode -eq '--server') {
+        $destroyed = @($events | Where-Object event -eq 'native-server-destroy-returned')
+        if ($destroyed.Count -ne 1 -or $destroyed[0].status -ne 0 -or !$destroyed[0].registry_empty -or !$destroyed[0].mutex_registry_empty -or !$destroyed[0].native_handle_invalidated -or @($events | Where-Object event -eq 'server-component-test-complete').Count -ne 1 -or @($events | Where-Object event -eq 'ipmi-client-created').Count -ne 0) { throw 'Server-only probe must register and clean up its synthetic endpoint' }
+    }
+    if ($mode -eq '--server-connect') {
+        $lookup = @($events | Where-Object event -eq 'native-connection-server-lookup')
+        $unsupported = @($events | Where-Object event -eq 'unsupported-ipmi-operation')
+        $failure = @($events | Where-Object event -eq 'failure')
+        if ($lookup.Count -ne 1 -or $lookup[0].lookup_error -ne $null -or $lookup[0].server_handle -ne $registered[0].handle -or $lookup[0].session_created) { throw 'Server-connect probe must find its synthetic server without creating a session' }
+        if ($unsupported.Count -ne 1 -or $unsupported[0].operation -ne 0x400 -or $failure.Count -ne 1 -or $failure[0].reason -ne 'Unsupported IPMI operation 0x400; no success response fabricated' -or @($events | Where-Object event -eq 'native-connection-completion-accepted').Count -ne 0) { throw 'Server-connect probe must stop before connection completion' }
+    }
+    if ($mode -eq '--server-dispatch') {
+        $lookup = @($events | Where-Object event -eq 'native-connection-server-lookup')
+        $packet = @($events | Where-Object event -eq 'native-server-received-connection-packet')
+        $callback = @($events | Where-Object event -eq 'native-server-connection-callback-reached')
+        $failure = @($events | Where-Object event -eq 'failure')
+        if ($lookup.Count -ne 1 -or $lookup[0].lookup_error -ne $null -or $lookup[0].server_handle -ne $registered[0].handle -or $lookup[0].session_created -or $packet.Count -ne 1 -or $packet[0].packet_type -ne 1 -or $packet[0].synthetic_test_endpoint -ne $true) { throw 'Server-dispatch probe must receive only the synthetic connection packet' }
+        if ($callback.Count -ne 1 -or !$callback[0].synthetic_test_endpoint -or $callback[0].original_shell_service_verified -or $callback[0].session_created -or $failure.Count -ne 1 -or $failure[0].reason -ne 'Original server dispatch reached the test callback; native session allocation is not implemented') { throw 'Server-dispatch probe crossed its explicit session-allocation boundary' }
+    }
+    if ($mode -eq '--server-session') {
+        $callback = @($events | Where-Object event -eq 'native-server-connection-callback-reached')
+        $created = @($events | Where-Object event -eq 'native-session-create-returned')
+        $destroyed = @($events | Where-Object event -eq 'ipmi-session-destroyed')
+        $failure = @($events | Where-Object event -eq 'failure')
+        if ($callback.Count -ne 1 -or !$callback[0].synthetic_test_endpoint -or $callback[0].original_shell_service_verified -or $created.Count -ne 1 -or $created[0].status -ne 0 -or !$created[0].registry_matches_native_object -or !$created[0].synthetic_test_endpoint -or $created[0].connection_completed -or $destroyed.Count -ne 1 -or $destroyed[0].handle -ne $created[0].handle) { throw 'Server-session probe must create and destroy only its synthetic session' }
+        if ($failure.Count -ne 1 -or $failure[0].reason -ne 'Native session lifecycle verified; connection completion and concurrent dispatch remain unsupported' -or @($events | Where-Object event -eq 'native-connection-completion-accepted').Count -ne 0) { throw 'Server-session probe must stop before connection completion' }
+    }
     if ($mode -in @('--handshake','--threaded-handshake','--threaded-request','--threaded-multibuffer-request','--threaded-multibuffer-dispatch','--threaded-multibuffer-reply-probe','--threaded-rpc','--threaded-rpc-error','--threaded-multibuffer-rpc','--threaded-multibuffer-rpc-error')) {
         $connect = @($events | Where-Object event -eq 'native-connect-returned')
         $complete = @($events | Where-Object event -eq 'native-connection-completion-accepted')

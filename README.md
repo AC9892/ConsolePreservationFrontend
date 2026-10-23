@@ -41,6 +41,8 @@ The output parent must exist and reports must remain outside the dump. Native co
 
 The current component build, 23 component tests and all-target Clippy passed. Independent validation passed 32 transport workers and nine logger probes at their exact expected boundaries (41 controlled workers total, no timeouts). Firmware-dependent evidence remains private and is not bundled.
 
+Provider research additionally has six synthetic analyzer regression checks. The latest transport-script update adds explicit early-stage failure and cleanup assertions and passed 16 focused worker runs against the unchanged component binary. These checks do not establish an authentic running service.
+
 The original SystemLogger library now loads alongside original IPMI, completes its module entry and begins public initialization. Opt-in bounded allocation, string-copy and diagnostic mutex-attribute bridges advance to an original logger client connection request. It finds no SceSystemLoggerService server and stops at unsupported connection operation 0x400 without a fabricated response. Initialization has not succeeded. A read-only hash-pinned analysis tool records original ShellCore provider creation, worker dispatch and thread dependencies. Next work: establish callback registration and startup prerequisites, then evaluate backend process/service integration. No successful firmware boot is claimed.
 
 See [SystemLogger execution limits](docs/SYSTEMLOGGER.md) for the original-library checkpoint and allocator failure policy.
