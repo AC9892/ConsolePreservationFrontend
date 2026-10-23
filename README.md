@@ -39,9 +39,9 @@ The output parent must exist and reports must remain outside the dump. Native co
 
 ## Validation and remaining work
 
-The current component build, 19 component tests and all-target Clippy passed. The transport regression suite passed 32 controlled workers; five logger probes passed their exact expected boundaries (37 controlled workers total). Separate logger probes record exact initialization dependency boundaries. Firmware-dependent evidence remains private and is not bundled.
+The current component build, 23 component tests and all-target Clippy passed. Independent validation passed 32 transport workers and nine logger probes at their exact expected boundaries (41 controlled workers total, no timeouts). Firmware-dependent evidence remains private and is not bundled.
 
-The original SystemLogger library now loads alongside the original IPMI provider, completes its module entry and begins public initialization. An opt-in bounded malloc/operator-new bridge and bounded strncpy advance to missing scePthreadMutexattrInit; initialization has not succeeded. Next work: resolve further bounded libc/mutex dependencies, identify authentic service providers and evaluate backend process/service integration. The current generic transport supports only the tested synthetic request shape. No successful firmware boot is claimed.
+The original SystemLogger library now loads alongside original IPMI, completes its module entry and begins public initialization. Opt-in bounded allocation, string-copy and diagnostic mutex-attribute bridges advance to an original logger client connection request. It finds no SceSystemLoggerService server and stops at unsupported connection operation 0x400 without a fabricated response. Initialization has not succeeded. A read-only hash-pinned analysis tool records original ShellCore provider creation, worker dispatch and thread dependencies. Next work: establish callback registration and startup prerequisites, then evaluate backend process/service integration. No successful firmware boot is claimed.
 
 See [SystemLogger execution limits](docs/SYSTEMLOGGER.md) for the original-library checkpoint and allocator failure policy.
 

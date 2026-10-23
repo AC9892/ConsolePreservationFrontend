@@ -22,6 +22,8 @@ mod native {
     };
     const HASH: &str = "c9081d79493740a55fc3d40e160e906c17879abeca47a9315188656113853ae5";
     const LOGGER_HASH: &str = "817f9b8efa23e9693e712f5e5818a30505f81aa986a1e96870c3c3cec8f71ab0";
+    const ATTRIBUTE_KERNEL_HASH: &str =
+        "188b440550403ae149a733f3da2ce5fc905ae6528a2379f87ff4c4b798171899";
     static GUARD: u64 = 0x5a72183c992db467;
     static NEED_LIBC: u64 = 0;
     static MUTEXES: std::sync::Mutex<BTreeMap<usize, (u32, u32)>> =
@@ -75,6 +77,11 @@ mod native {
         static LOGGER_ALLOCATOR: Cell<bool> = const { Cell::new(false) };
         static LOGGER_NEW: Cell<bool> = const { Cell::new(false) };
         static LOGGER_COPY: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_ATTR_PROBE: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_ATTR_INIT: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_MUTEX_CREATE: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_ATTR_DESTROY: Cell<bool> = const { Cell::new(false) };
+        static LOGGER_ATTRIBUTES: RefCell<BTreeMap<usize,usize>> = const { RefCell::new(BTreeMap::new()) };
         static LOGGER_ALLOCATIONS: RefCell<BTreeMap<usize,Block>> = const { RefCell::new(BTreeMap::new()) };
     }
     // Diagnostic process-owned allocator, not a model of the PS4 libc heap.
@@ -198,6 +205,100 @@ mod native {
             "bounded_host_bridge":true}),
         );
         destination
+    }
+    fn create_logger_attribute(output: usize) -> Result<usize, &'static str> {
+        if !can_access(output, 8, true) {
+            return Err("Mutex attribute output is not owned writable pointer storage");
+        }
+        let pointer = unsafe { logger_malloc(12) };
+        if pointer == 0 {
+            return Err(
+                "Mutex attribute allocation failed; native failure mapping remains unsupported",
+            );
+        }
+        unsafe {
+            (pointer as *mut u32).write_unaligned(1);
+            ((pointer + 4) as *mut u32).write_unaligned(0);
+            ((pointer + 8) as *mut u32).write_unaligned(0);
+        }
+        LOGGER_ATTRIBUTES.with(|a| a.borrow_mut().insert(pointer, output));
+        unsafe { (output as *mut usize).write_unaligned(pointer) };
+        Ok(pointer)
+    }
+    unsafe extern "sysv64" fn logger_mutexattr_init(output: usize) -> i32 {
+        if !LOGGER_ATTR_PROBE.get() && !LOGGER_ATTR_INIT.get() {
+            stop("Logger attribute probe was not opted into");
+        }
+        if !can_access(output, 8, true) {
+            stop("Mutex attribute output is not owned writable pointer storage");
+        }
+        let mut low = 0;
+        let mut high = 0;
+        unsafe {
+            windows_sys::Win32::System::Threading::GetCurrentThreadStackLimits(&mut low, &mut high)
+        };
+        let on_stack = output >= low && output.checked_add(8).is_some_and(|end| end <= high);
+        event(
+            json!({"event":"logger-mutexattr-output-captured","output_slot_bytes":8,
+            "output_slot_writable":true,"output_on_worker_stack":on_stack,"attribute_written":false}),
+        );
+        if !LOGGER_ATTR_INIT.get() {
+            stop(
+                "Original mutex-attribute output captured; attribute creation remains unsupported",
+            );
+        }
+        let pointer = create_logger_attribute(output).unwrap_or_else(|e| stop(e));
+        event(
+            json!({"event":"logger-owned-mutexattr-initialized","object_bytes":12,
+            "default_words":[1,0,0],"pointer_matches_registry":LOGGER_ATTRIBUTES.with(|a|a.borrow().get(&pointer)==Some(&output)),
+            "synthetic_host_attribute":true,"native_kernel_implementation_executed":false}),
+        );
+        0
+    }
+    fn destroy_logger_attribute(output: usize) -> Result<(), &'static str> {
+        if !can_access(output, 8, true) {
+            return Err("Attribute destroy requires owned writable pointer storage");
+        }
+        let pointer = usize::from_le_bytes(read(output, 8).try_into().unwrap());
+        if !LOGGER_ATTRIBUTES.with(|a| a.borrow().get(&pointer) == Some(&output)) {
+            return Err("Attribute destroy pointer identity is not owned");
+        }
+        let block = LOGGER_ALLOCATIONS
+            .with(|a| a.borrow_mut().remove(&pointer))
+            .ok_or("Attribute allocation ownership is missing")?;
+        LOGGER_ATTRIBUTES.with(|a| a.borrow_mut().remove(&pointer));
+        unsafe { (output as *mut usize).write_unaligned(0) };
+        drop(block);
+        event(
+            json!({"event":"logger-owned-mutexattr-destroyed","pointer_slot_cleared":true,
+            "object_mapping_released":!can_access(pointer,1,false),
+            "remaining_attribute_objects":LOGGER_ATTRIBUTES.with(|a|a.borrow().len()),
+            "remaining_logger_allocations":LOGGER_ALLOCATIONS.with(|a|a.borrow().len()),
+            "synthetic_host_attribute":true,"native_kernel_implementation_executed":false}),
+        );
+        Ok(())
+    }
+    unsafe extern "sysv64" fn logger_mutexattr_destroy(output: usize) -> i32 {
+        if !LOGGER_ATTR_DESTROY.get() {
+            stop("Logger attribute destruction was not opted into");
+        }
+        destroy_logger_attribute(output).unwrap_or_else(|e| stop(e));
+        0
+    }
+    fn logger_mutex_name(address: usize) -> String {
+        let mut bytes = Vec::new();
+        for index in 0..32 {
+            let pointer = address
+                .checked_add(index)
+                .unwrap_or_else(|| stop("Logger mutex name address overflow"));
+            let byte = read(pointer, 1)[0];
+            if byte == 0 {
+                return String::from_utf8(bytes)
+                    .unwrap_or_else(|_| stop("Logger mutex name is not UTF-8"));
+            }
+            bytes.push(byte);
+        }
+        stop("Logger mutex name exceeds its32-byte constructor buffer");
     }
     unsafe extern "sysv64" fn error_address() -> *mut i32 {
         ERRNO.with(|e| e.get())
@@ -373,10 +474,32 @@ mod native {
     }
     unsafe extern "sysv64" fn mutex_init(output: usize, attributes: usize, name: usize) -> i32 {
         use windows_sys::Win32::System::Threading::CreateMutexW;
-        if attributes != 0 || !can_access(output, 8, true) {
+        let logger_attributes = attributes != 0 && LOGGER_ATTR_INIT.get();
+        if logger_attributes {
+            let pointer = usize::from_le_bytes(read(attributes, 8).try_into().unwrap());
+            if !can_access(output, 8, true)
+                || !LOGGER_ATTRIBUTES.with(|a| a.borrow().get(&pointer) == Some(&attributes))
+                || read(pointer, 12)
+                    != [1u32.to_le_bytes(), 0u32.to_le_bytes(), 0u32.to_le_bytes()].concat()
+            {
+                stop("Logger mutex-create did not preserve the owned attribute contract");
+            }
+            if !LOGGER_MUTEX_CREATE.get() {
+                event(
+                    json!({"event":"logger-attributed-mutex-create-deferred","attribute_identity_verified":true,
+                    "output_writable":true,"mutex_created":false,"synthetic_host_attribute":true}),
+                );
+                stop("Logger mutex creation with attributes remains unsupported");
+            }
+        }
+        if (attributes != 0 && !logger_attributes) || !can_access(output, 8, true) {
             stop("Unsupported native mutex attributes/output");
         }
-        let title = string(name);
+        let title = if logger_attributes {
+            logger_mutex_name(name)
+        } else {
+            string(name)
+        };
         let handle = unsafe { CreateMutexW(std::ptr::null(), 0, std::ptr::null()) };
         if handle.is_null() {
             stop("Windows mutex creation failed");
@@ -386,6 +509,13 @@ mod native {
             (output as *mut usize).write_unaligned(handle as usize);
         }
         event(json!({"event":"native-mutex-initialized","name":title}));
+        if logger_attributes {
+            event(
+                json!({"event":"logger-attributed-mutex-created","name":title,
+                "attribute_identity_verified":true,"owned_host_mutex":true,
+                "native_kernel_implementation_executed":false}),
+            );
+        }
         0
     }
     fn mutex_handle(address: usize) -> usize {
@@ -1253,6 +1383,19 @@ mod native {
                                 *value
                             } else {
                                 let value = match symbol.name.as_str() {
+                                    "smWEktiyyG0"
+                                        if expected_hash == LOGGER_HASH
+                                            && LOGGER_ATTR_DESTROY.get() =>
+                                    {
+                                        logger_mutexattr_destroy as *const () as usize
+                                    }
+                                    "F8bUHwAG284"
+                                        if expected_hash == LOGGER_HASH
+                                            && (LOGGER_ATTR_PROBE.get()
+                                                || LOGGER_ATTR_INIT.get()) =>
+                                    {
+                                        logger_mutexattr_init as *const () as usize
+                                    }
                                     "6sJWiWSRuqk"
                                         if expected_hash == LOGGER_HASH && LOGGER_COPY.get() =>
                                     {
@@ -1829,11 +1972,42 @@ mod native {
         }
         if matches!(
             mode,
-            "--logger-initialize" | "--logger-allocate" | "--logger-new" | "--logger-copy"
+            "--logger-initialize"
+                | "--logger-allocate"
+                | "--logger-new"
+                | "--logger-copy"
+                | "--logger-attr-probe"
+                | "--logger-attr-init"
+                | "--logger-mutex-create"
+                | "--logger-mutex-lifecycle"
         ) {
             LOGGER_ALLOCATOR.set(mode != "--logger-initialize");
-            LOGGER_NEW.set(mode == "--logger-new" || mode == "--logger-copy");
-            LOGGER_COPY.set(mode == "--logger-copy");
+            let mutex = mode == "--logger-mutex-create" || mode == "--logger-mutex-lifecycle";
+            let attributes = mode == "--logger-attr-probe" || mode == "--logger-attr-init" || mutex;
+            LOGGER_NEW.set(mode == "--logger-new" || mode == "--logger-copy" || attributes);
+            LOGGER_COPY.set(mode == "--logger-copy" || attributes);
+            LOGGER_ATTR_PROBE.set(mode == "--logger-attr-probe");
+            LOGGER_ATTR_INIT.set(mode == "--logger-attr-init" || mutex);
+            LOGGER_MUTEX_CREATE.set(mutex);
+            LOGGER_ATTR_DESTROY.set(mode == "--logger-mutex-lifecycle");
+            if LOGGER_ATTR_INIT.get() {
+                let mut reference = Vec::new();
+                fs::File::open(path.with_file_name("libkernel.sprx"))
+                    .map_err(|e| e.to_string())?
+                    .take(1024 * 1024 + 1)
+                    .read_to_end(&mut reference)
+                    .map_err(|e| e.to_string())?;
+                if reference.len() > 1024 * 1024
+                    || format!("{:x}", Sha256::digest(&reference)) != ATTRIBUTE_KERNEL_HASH
+                {
+                    return Err(
+                        "Attribute reference kernel hash differs from researched profile".into(),
+                    );
+                }
+                event(
+                    json!({"event":"logger-attribute-reference-verified","sha256":ATTRIBUTE_KERNEL_HASH,"kernel_executed":false}),
+                );
+            }
             let provider = module.functions();
             let logger = Module::load_pinned(
                 &path.with_file_name("libSceSystemLogger.sprx"),
@@ -2359,6 +2533,107 @@ mod native {
             assert_eq!(read(address, 32), vec![0xa5; 32]);
         }
         #[test]
+        fn logger_attribute_owns_object_and_validates_pointer_slot() {
+            LOGGER_ALLOCATOR.set(true);
+            let slot = Block::new(8).unwrap();
+            let address = slot.address as usize;
+            let pointer = create_logger_attribute(address).unwrap();
+            assert_eq!(mutex_handle(address), pointer);
+            assert_eq!(
+                read(pointer, 12),
+                [1u32.to_le_bytes(), 0u32.to_le_bytes(), 0u32.to_le_bytes()].concat()
+            );
+            LOGGER_ATTRIBUTES.with(|a| assert_eq!(a.borrow().get(&pointer), Some(&address)));
+            assert!(create_logger_attribute(0).is_err());
+            let mut old = 0;
+            assert_ne!(
+                unsafe { VirtualProtect(slot.address as *const _, 8, PAGE_READONLY, &mut old) },
+                0
+            );
+            assert!(create_logger_attribute(address).is_err());
+            assert_eq!(mutex_handle(address), pointer);
+            LOGGER_ALLOCATIONS.with(|a| assert_eq!(a.borrow().len(), 1));
+            LOGGER_ATTRIBUTES.with(|a| a.borrow_mut().clear());
+            LOGGER_ALLOCATIONS.with(|a| a.borrow_mut().clear());
+            LOGGER_ALLOCATOR.set(false);
+        }
+        #[test]
+        fn logger_attribute_budget_failure_preserves_output_slot() {
+            LOGGER_ALLOCATOR.set(true);
+            let slot = Block::new(8).unwrap();
+            let address = slot.address as usize;
+            unsafe { (slot.address as *mut usize).write_unaligned(usize::MAX) };
+            assert_ne!(unsafe { logger_malloc(1024 * 1024) }, 0);
+            assert!(create_logger_attribute(address).is_err());
+            assert_eq!(mutex_handle(address), usize::MAX);
+            LOGGER_ATTRIBUTES.with(|a| assert!(a.borrow().is_empty()));
+            LOGGER_ALLOCATIONS.with(|a| assert_eq!(a.borrow().len(), 1));
+            LOGGER_ALLOCATIONS.with(|a| a.borrow_mut().clear());
+            LOGGER_ALLOCATOR.set(false);
+        }
+        #[test]
+        fn attributed_mutex_and_owned_attribute_release_are_separate() {
+            LOGGER_ALLOCATOR.set(true);
+            LOGGER_ATTR_INIT.set(true);
+            LOGGER_MUTEX_CREATE.set(true);
+            let slot = Block::new(8).unwrap();
+            let output = Block::new(8).unwrap();
+            let name = Block::new(32).unwrap();
+            let label = c"SceSysLogExternalIpcClient".to_bytes_with_nul();
+            unsafe { std::ptr::copy_nonoverlapping(label.as_ptr(), name.address, label.len()) };
+            let attribute = create_logger_attribute(slot.address as usize).unwrap();
+            assert_eq!(
+                unsafe {
+                    mutex_init(
+                        output.address as usize,
+                        slot.address as usize,
+                        name.address as usize,
+                    )
+                },
+                0
+            );
+            let handle = mutex_handle(output.address as usize);
+            assert!(MUTEXES.lock().unwrap().contains_key(&handle));
+            destroy_logger_attribute(slot.address as usize).unwrap();
+            assert_eq!(mutex_handle(slot.address as usize), 0);
+            assert!(!can_access(attribute, 1, false));
+            // Attribute destruction must not close the separately owned mutex.
+            assert!(MUTEXES.lock().unwrap().contains_key(&handle));
+            assert!(destroy_logger_attribute(slot.address as usize).is_err());
+            assert_eq!(unsafe { mutex_destroy(output.address as usize) }, 0);
+            LOGGER_ATTRIBUTES.with(|a| assert!(a.borrow().is_empty()));
+            LOGGER_ALLOCATIONS.with(|a| assert!(a.borrow().is_empty()));
+            LOGGER_MUTEX_CREATE.set(false);
+            LOGGER_ATTR_INIT.set(false);
+            LOGGER_ALLOCATOR.set(false);
+        }
+        #[test]
+        fn attribute_destroy_rejects_wrong_slot_and_readonly_output() {
+            LOGGER_ALLOCATOR.set(true);
+            let slot = Block::new(8).unwrap();
+            let alias = Block::new(8).unwrap();
+            let pointer = create_logger_attribute(slot.address as usize).unwrap();
+            unsafe { (alias.address as *mut usize).write_unaligned(pointer) };
+            assert!(destroy_logger_attribute(alias.address as usize).is_err());
+            let mut old = 0;
+            assert_ne!(
+                unsafe { VirtualProtect(slot.address as *const _, 8, PAGE_READONLY, &mut old) },
+                0
+            );
+            assert!(destroy_logger_attribute(slot.address as usize).is_err());
+            assert_eq!(mutex_handle(slot.address as usize), pointer);
+            assert!(can_access(pointer, 12, false));
+            let mut ignored = 0;
+            assert_ne!(
+                unsafe { VirtualProtect(slot.address as *const _, 8, old, &mut ignored) },
+                0
+            );
+            destroy_logger_attribute(slot.address as usize).unwrap();
+            assert_eq!(mutex_handle(slot.address as usize), 0);
+            assert!(!can_access(pointer, 1, false));
+            LOGGER_ALLOCATOR.set(false);
+        }
+        #[test]
         fn native_profile_provider_requirements_fail_before_file_access() {
             let absent = Path::new("not-a-module.synthetic");
             assert!(Module::load_pinned(absent, "unverified", None)
@@ -2431,6 +2706,10 @@ fn main() {
                         "--logger-allocate",
                         "--logger-new",
                         "--logger-copy",
+                        "--logger-attr-probe",
+                        "--logger-attr-init",
+                        "--logger-mutex-create",
+                        "--logger-mutex-lifecycle",
                         "--logger-new-failure",
                         "--server",
                         "--server-connect",
@@ -2450,7 +2729,7 @@ fn main() {
                     .contains(&args[2].as_str()))
             {
                 return Err(
-                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--logger-initialize|--logger-allocate|--logger-new|--logger-copy|--logger-new-failure|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-multibuffer-request|--threaded-multibuffer-dispatch|--threaded-multibuffer-reply-probe|--threaded-multibuffer-rpc|--threaded-multibuffer-rpc-error|--threaded-rpc|--threaded-rpc-error]".into(),
+                    "Usage: PS4ModuleTest DUMP_ROOT REPORT_PARENT [--connect|--logger-initialize|--logger-allocate|--logger-new|--logger-copy|--logger-attr-probe|--logger-attr-init|--logger-mutex-create|--logger-mutex-lifecycle|--logger-new-failure|--server|--server-connect|--server-dispatch|--server-session|--handshake|--threaded-handshake|--threaded-request|--threaded-multibuffer-request|--threaded-multibuffer-dispatch|--threaded-multibuffer-reply-probe|--threaded-multibuffer-rpc|--threaded-multibuffer-rpc-error|--threaded-rpc|--threaded-rpc-error]".into(),
                 );
             }
             let dump = fs::canonicalize(&args[0]).map_err(|e| e.to_string())?;
