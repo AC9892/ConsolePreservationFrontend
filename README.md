@@ -1,4 +1,4 @@
-# CPF Xbox 360 â€” experimental Xenia Canary integration
+# CPF Xbox 360 - experimental Xenia Canary integration
 
 **Known limitations first: Game Details does not work, original avatar rendering/customization remains unresolved, and seamless dashboard/game switching is not implemented. Preferences also remains unsupported. This is experimental source, not a complete Xbox 360 operating-system emulator or a release.**
 
