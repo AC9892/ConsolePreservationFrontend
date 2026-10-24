@@ -1,0 +1,895 @@
+diff --git a/src/xenia/app/emulator_window.cc b/src/xenia/app/emulator_window.cc
+index fbd2f98640f2caeaaf48739afacb9095124db9f6..b00bdf9f227b4942379f8a643c6c4fa3ea801c46 100644
+--- a/src/xenia/app/emulator_window.cc
++++ b/src/xenia/app/emulator_window.cc
+@@ -761,6 +761,12 @@ bool EmulatorWindow::Initialize() {
+         MenuItem::Create(MenuItem::Type::kString, "&Open...", "Ctrl+O",
+                          std::bind(&EmulatorWindow::FileOpen, this)));
+     file_menu->AddChild(std::move(recent_menu));
++    file_menu->AddChild(MenuItem::Create(
++        MenuItem::Type::kString, "Mount game disc...",
++        std::bind(&EmulatorWindow::MountDashboardDisc, this)));
++    file_menu->AddChild(MenuItem::Create(
++        MenuItem::Type::kString, "Eject game disc",
++        std::bind(&EmulatorWindow::EjectDashboardDisc, this)));
+     file_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
+     zar_menu->AddChild(
+         MenuItem::Create(MenuItem::Type::kString, "Create",
+@@ -1258,6 +1264,35 @@ void EmulatorWindow::FileDrop(const std::filesystem::path& path) {
+   RunTitle(path);
+ }
+ 
++void EmulatorWindow::MountDashboardDisc() {
++  auto picker = xe::ui::FilePicker::Create();
++  picker->set_mode(ui::FilePicker::Mode::kOpen);
++  picker->set_type(ui::FilePicker::Type::kFile);
++  picker->set_multi_selection(false);
++  picker->set_title("Mount Xbox 360 game disc");
++  picker->set_extensions({{"Xbox 360 disc image", "*.iso"}});
++  if (!picker->Show(window_.get()) || picker->selected_files().empty()) {
++    return;
++  }
++  const auto result =
++      emulator_->MountDashboardDisc(picker->selected_files().front());
++  if (XFAILED(result)) {
++    xe::ui::ImGuiDialog::ShowMessageBox(
++        imgui_drawer_.get(), "Disc mount failed",
++        result == X_STATUS_ACCESS_DENIED
++            ? "Open the Xbox 360 dashboard before mounting a disc."
++            : "The selected image is not a supported Xbox 360 game disc.");
++  }
++}
++
++void EmulatorWindow::EjectDashboardDisc() {
++  if (XFAILED(emulator_->EjectDashboardDisc())) {
++    xe::ui::ImGuiDialog::ShowMessageBox(
++        imgui_drawer_.get(), "Disc eject unavailable",
++        "Disc mounting and ejection are available while the dashboard is open.");
++  }
++}
++
+ void EmulatorWindow::FileOpen() {
+   std::filesystem::path path;
+ 
+diff --git a/src/xenia/app/emulator_window.h b/src/xenia/app/emulator_window.h
+index cc085b60c274dfbe7ac31061aed59e8a3098b1a6..09a3cbfe326c9231b52addda067cf7ab09e10f31 100644
+--- a/src/xenia/app/emulator_window.h
++++ b/src/xenia/app/emulator_window.h
+@@ -267,6 +267,8 @@ class EmulatorWindow {
+   void FileDrop(const std::filesystem::path& filename);
+   void OnMouseUp(const ui::MouseEvent& e);
+   void FileOpen();
++  void MountDashboardDisc();
++  void EjectDashboardDisc();
+   void FileClose();
+   void InstallContent();
+   void ExtractZarchive();
+diff --git a/src/xenia/app/xenia_main.cc b/src/xenia/app/xenia_main.cc
+index 9777dc6e16f61cf4cc4aadc1c0c0ec3183e526e6..32d8ddbd65620321353ed6da79d2163a7f41b04e 100644
+--- a/src/xenia/app/xenia_main.cc
++++ b/src/xenia/app/xenia_main.cc
+@@ -9,9 +9,11 @@
+ 
+ #include <atomic>
+ #include <cstdlib>
++#include <filesystem>
+ #include <functional>
+ #include <memory>
+ #include <string>
++#include <system_error>
+ #include <thread>
+ 
+ #include "xenia/app/discord/discord_presence.h"
+@@ -521,6 +523,14 @@ bool EmulatorApp::OnInitialize() {
+   content_root = std::filesystem::absolute(content_root);
+   XELOGI("Content root: {}", content_root);
+ 
++  // The dashboard may query content device capacity before a package is
++  // installed. Ensure the root exists before those queries reach ContentManager.
++  std::error_code content_root_error;
++  std::filesystem::create_directories(content_root, content_root_error);
++  if (content_root_error) {
++    XELOGW("Failed to create content root: {}", content_root_error.message());
++  }
++
+   std::filesystem::path cache_root = cvars::cache_root;
+   if (cache_root.empty()) {
+     cache_root = storage_root / "cache_host";
+diff --git a/src/xenia/cpu/backend/x64/x64_emitter.cc b/src/xenia/cpu/backend/x64/x64_emitter.cc
+index 694c92b4ea6f4a61003f1608b555a3d91724532c..f9bc7a2d0f6d6fc01356ea06e8991c5dc9e6cc5d 100644
+--- a/src/xenia/cpu/backend/x64/x64_emitter.cc
++++ b/src/xenia/cpu/backend/x64/x64_emitter.cc
+@@ -787,6 +787,24 @@ void X64Emitter::CallIndirect(const hir::Instr* instr,
+ 
+ uint64_t UndefinedCallExtern(void* raw_context, uint64_t function_ptr) {
+   auto function = reinterpret_cast<Function*>(function_ptr);
++  // Keep dashboard routing diagnostics free of guest strings, addresses and
++  // profile data. Register shapes and the guest call site are sufficient to
++  // narrow down the ABI without copying private console data into logs.
++  const auto& name = function->name();
++  if (name == "XamPushBackURI" || name == "XamLaunchURI" ||
++      name == "XamShowOptionsUI") {
++    const auto* context = static_cast<const ppc::PPCContext*>(raw_context);
++    auto argument_shape = [](uint64_t value) {
++      if (!value) return "zero";
++      if (value < 0x10000) return "small";
++      if (value <= UINT32_MAX) return "guest-address-or-value";
++      return "wide-value";
++    };
++    XELOGI("Dashboard XAM call {} caller {:08X} args [{}, {}, {}, {}]",
++           name, static_cast<uint32_t>(context->lr),
++           argument_shape(context->r[3]), argument_shape(context->r[4]),
++           argument_shape(context->r[5]), argument_shape(context->r[6]));
++  }
+   if (!cvars::ignore_undefined_externs) {
+     xe::FatalError(fmt::format("undefined extern call to {:08X} {}",
+                                function->address(), function->name().c_str()));
+diff --git a/src/xenia/emulator.cc b/src/xenia/emulator.cc
+index eadd15ccf9d3e3836795f966a3bdafd5a1fc218d..048027573c038a3b4218a0c403fedc75ab5ad2d8 100644
+--- a/src/xenia/emulator.cc
++++ b/src/xenia/emulator.cc
+@@ -40,6 +40,7 @@
+ #include "xenia/hid/input_driver.h"
+ #include "xenia/hid/input_system.h"
+ #include "xenia/kernel/kernel_state.h"
++#include "xenia/kernel/smc.h"
+ #include "xenia/kernel/title_id_utils.h"
+ #include "xenia/kernel/user_module.h"
+ #include "xenia/kernel/xam/achievement_manager.h"
+@@ -445,6 +446,112 @@ void Emulator::SetPersistentEmulatorFlags(uint64_t new_flags) {
+ #endif
+ }
+ 
++X_STATUS Emulator::MountDashboardDisc(const std::filesystem::path& path) {
++  if (!is_title_open() || kernel_state_->title_id() != kernel::kDashboardID) {
++    return X_STATUS_ACCESS_DENIED;
++  }
++  const auto mount_path =
++      fmt::format("\\Device\\DashboardDisc{}", ++dashboard_disc_mount_count_);
++  auto device = std::make_unique<vfs::DiscImageDevice>(mount_path, path);
++  if (!device->Initialize()) {
++    return X_STATUS_INVALID_IMAGE_FORMAT;
++  }
++  auto entry = device->ResolvePath("default.xex");
++  auto header = entry ? entry->OpenMapped(MappedMemory::Mode::kRead, 0, 1_MiB)
++                      : nullptr;
++  if (!header || header->size() < 24 ||
++      std::memcmp(header->data(), "XEX2", 4)) {
++    return X_STATUS_INVALID_IMAGE_FORMAT;
++  }
++  const auto* bytes = header->data();
++  const uint32_t security_offset = xe::load_and_swap<uint32_t>(bytes + 16);
++  if (security_offset > header->size() ||
++      header->size() - security_offset < 0x150) {
++    return X_STATUS_INVALID_IMAGE_FORMAT;
++  }
++  const uint32_t count = xe::load_and_swap<uint32_t>(bytes + 20);
++  if (count > (header->size() - 24) / 8) {
++    return X_STATUS_INVALID_IMAGE_FORMAT;
++  }
++  uint32_t title_id = 0;
++  for (uint32_t i = 0; i < count; ++i) {
++    if (xe::load_and_swap<uint32_t>(bytes + 24 + i * 8) !=
++        XEX_HEADER_EXECUTION_INFO) {
++      continue;
++    }
++    const uint32_t offset = xe::load_and_swap<uint32_t>(bytes + 28 + i * 8);
++    if (offset > header->size() || header->size() - offset < 24) {
++      return X_STATUS_INVALID_IMAGE_FORMAT;
++    }
++    title_id = xe::load_and_swap<uint32_t>(bytes + offset + 12);
++    break;
++  }
++  if (!title_id || kernel::IsSystemTitle(title_id)) {
++    return X_STATUS_INVALID_IMAGE_FORMAT;
++  }
++  if (!dashboard_disc_title_id_.load()) {
++    dashboard_disc_previous_partition_.clear();
++    file_system_->FindSymbolicLink(kDefaultPartitionSymbolicLink,
++                                  dashboard_disc_previous_partition_);
++  }
++  file_system_->RegisterDevice(std::move(device));
++  // Keep old devices alive until shutdown: guest file handles may still point
++  // to them after a media change. Only switch the drive aliases on insert/eject.
++  for (auto alias : {"\\Device\\Cdrom0", "DVD:", "D:"}) {
++    file_system_->UnregisterSymbolicLink(alias);
++    file_system_->RegisterSymbolicLink(alias, mount_path);
++  }
++  {
++    std::lock_guard lock(dashboard_disc_metadata_mutex_);
++    std::memcpy(dashboard_disc_media_id_.data(),
++                bytes + security_offset + 0x140,
++                dashboard_disc_media_id_.size());
++    dashboard_disc_title_id_.store(title_id);
++  }
++  kernel_state_->smc()->SetTrayState(X_DVD_TRAY_STATE::CLOSED, false);
++  // The loader's media-change notification carries the detected disc type,
++  // rather than the physical SMC tray-state enumeration.
++  kernel_state_->BroadcastNotification(kXNotificationSystemTrayStateChanged,
++                                       X_DVD_DISC_STATE::XBOX_360_GAME_DISC);
++  XELOGI("Dashboard virtual disc inserted, title {:08X} (read-only)", title_id);
++  return X_STATUS_SUCCESS;
++}
++
++bool Emulator::GetDashboardDiscMediaId(uint8_t* media_id) {
++  std::lock_guard lock(dashboard_disc_metadata_mutex_);
++  if (!dashboard_disc_title_id_.load()) {
++    return false;
++  }
++  std::memcpy(media_id, dashboard_disc_media_id_.data(),
++              dashboard_disc_media_id_.size());
++  return true;
++}
++
++X_STATUS Emulator::EjectDashboardDisc() {
++  if (!is_title_open() || kernel_state_->title_id() != kernel::kDashboardID) {
++    return X_STATUS_ACCESS_DENIED;
++  }
++  {
++    std::lock_guard lock(dashboard_disc_metadata_mutex_);
++    if (!dashboard_disc_title_id_.exchange(0)) {
++      return X_STATUS_SUCCESS;
++    }
++    dashboard_disc_media_id_.fill(0);
++  }
++  for (auto alias : {"\\Device\\Cdrom0", "DVD:", "D:"}) {
++    file_system_->UnregisterSymbolicLink(alias);
++  }
++  if (!dashboard_disc_previous_partition_.empty()) {
++    file_system_->RegisterSymbolicLink(kDefaultPartitionSymbolicLink,
++                                      dashboard_disc_previous_partition_);
++  }
++  kernel_state_->smc()->SetTrayState(X_DVD_TRAY_STATE::OPEN, false);
++  kernel_state_->BroadcastNotification(kXNotificationSystemTrayStateChanged,
++                                       X_DVD_DISC_STATE::NO_DISC);
++  XELOGI("Dashboard virtual disc ejected");
++  return X_STATUS_SUCCESS;
++}
++
+ X_STATUS Emulator::MountPath(const std::filesystem::path& path,
+                              const std::string_view mount_path) {
+   auto device = CreateVfsDevice(path, mount_path);
+diff --git a/src/xenia/emulator.h b/src/xenia/emulator.h
+index 9d5e92e4c80b8a8dde88a83a1ee0cd38f86ba998..d21fad29dd5a5029bfe0a449368be424c4f5314a 100644
+--- a/src/xenia/emulator.h
++++ b/src/xenia/emulator.h
+@@ -10,9 +10,12 @@
+ #ifndef XENIA_EMULATOR_H_
+ #define XENIA_EMULATOR_H_
+ 
++#include <array>
++#include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <functional>
++#include <mutex>
+ #include <optional>
+ #include <string>
+ #include <vector>
+@@ -200,6 +203,15 @@ class Emulator {
+   X_STATUS MountPath(const std::filesystem::path& path,
+                      const std::string_view mount_path);
+ 
++  // Virtual optical media for a running dashboard; leaves GAME: on the flash
++  // filesystem. UI thread only, except for the atomic media-info accessor.
++  X_STATUS MountDashboardDisc(const std::filesystem::path& path);
++  X_STATUS EjectDashboardDisc();
++  uint32_t dashboard_disc_title_id() const {
++    return dashboard_disc_title_id_.load();
++  }
++  bool GetDashboardDiscMediaId(uint8_t* media_id);
++
+   enum class FileSignatureType {
+     XEX0,
+     XEXQ,
+@@ -338,6 +350,11 @@ class Emulator {
+   std::filesystem::path storage_root_;
+   std::filesystem::path content_root_;
+   std::filesystem::path cache_root_;
++  std::atomic<uint32_t> dashboard_disc_title_id_{0};
++  std::mutex dashboard_disc_metadata_mutex_;
++  std::array<uint8_t, 16> dashboard_disc_media_id_{};
++  uint32_t dashboard_disc_mount_count_ = 0;
++  std::string dashboard_disc_previous_partition_;
+ 
+   std::string title_name_;
+   std::string title_version_;
+diff --git a/src/xenia/hid/keyboard/keyboard_input_driver.cc b/src/xenia/hid/keyboard/keyboard_input_driver.cc
+index 0277b0c1ac92589b34bba3c8ef425fb3edcdad9f..76b7fb7abf8c1cdbcf2887b78ebf671cfd58e16a 100644
+--- a/src/xenia/hid/keyboard/keyboard_input_driver.cc
++++ b/src/xenia/hid/keyboard/keyboard_input_driver.cc
+@@ -420,16 +420,7 @@ X_RESULT KeyboardInputDriver::GetKeystroke(uint32_t user_index, uint32_t flags,
+ 
+   if (!IsPassthroughEnabled()) {
+     if (IsKeyboardForUserEnabled(user_index)) {
+-      for (const KeyBinding& key_binding : key_bindings_) {
+-        if (key_binding.input_key != evt.virtual_key) {
+-          continue;
+-        }
+-
+-        if (key_binding.is_pressed) {
+-          xinput_virtual_key = key_binding.output_key;
+-          break;
+-        }
+-      }
++      xinput_virtual_key = evt.output_key;
+     }
+   } else {
+     xinput_virtual_key = evt.virtual_key;
+@@ -514,7 +505,6 @@ void KeyboardInputDriver::OnKey(ui::KeyEvent& e, bool is_down) {
+   key.capital_pressed = e.is_capital_pressed();
+ 
+   auto global_lock = global_critical_region_.Acquire();
+-  key_events_.push_back(key);
+ 
+   bool uppercase = key.capital_pressed || key.shift_pressed;
+ 
+@@ -526,21 +516,35 @@ void KeyboardInputDriver::OnKey(ui::KeyEvent& e, bool is_down) {
+       continue;
+     }
+ 
++    // Release the binding chosen on key-down even if modifiers changed.
++    if (!is_down) {
++      if (key_binding.is_pressed) {
++        key_binding.is_pressed = false;
++        key.output_key = key_binding.output_key;
++        break;
++      }
++      continue;
++    }
++
+     if (key_binding.uppercase && uppercase) {
+       key_binding.is_pressed = is_down;
++      key.output_key = key_binding.output_key;
+       break;
+     }
+ 
+     if (key_binding.lowercase && !uppercase) {
+       key_binding.is_pressed = is_down;
++      key.output_key = key_binding.output_key;
+       break;
+     }
+ 
+     if (!key_binding.uppercase && !key_binding.lowercase) {
+       key_binding.is_pressed = is_down;
++      key.output_key = key_binding.output_key;
+       break;
+     }
+   }
++  key_events_.push_back(key);
+ }
+ 
+ void KeyboardInputDriver::OnChar(ui::KeyEvent& e) {
+diff --git a/src/xenia/hid/keyboard/keyboard_input_driver.h b/src/xenia/hid/keyboard/keyboard_input_driver.h
+index 9cd375b7ffeea1e7e320247a75ddadc24137bcf0..549dbc53f429ad5a32af12de257b10d241660f6c 100644
+--- a/src/xenia/hid/keyboard/keyboard_input_driver.h
++++ b/src/xenia/hid/keyboard/keyboard_input_driver.h
+@@ -61,6 +61,7 @@ class KeyboardInputDriver final : public InputDriver {
+ 
+   struct KeyEvent {
+     ui::VirtualKey virtual_key = ui::VirtualKey::kNone;
++    ui::VirtualKey output_key = ui::VirtualKey::kNone;
+     int repeat_count = 0;
+     bool transition = false;  // going up(false) or going down(true)
+     bool prev_state = false;  // down(true) or up(false)
+diff --git a/src/xenia/kernel/smc.cc b/src/xenia/kernel/smc.cc
+index f2c81a9956f93be8c181f1ff99a62c7f818b5c4e..504e0e3355d1ed5dbc1e9d20b9373e5749380adf 100644
+--- a/src/xenia/kernel/smc.cc
++++ b/src/xenia/kernel/smc.cc
+@@ -52,10 +52,13 @@ SystemManagementController::SystemManagementController()
+ };
+ SystemManagementController::~SystemManagementController() {};
+ 
+-void SystemManagementController::SetTrayState(X_DVD_TRAY_STATE state) {
++void SystemManagementController::SetTrayState(X_DVD_TRAY_STATE state,
++                                             bool notify) {
+   dvd_tray_state_ = state;
+-  kernel_state()->BroadcastNotification(kXNotificationSystemTrayStateChanged,
+-                                        static_cast<uint8_t>(state));
++  if (notify) {
++    kernel_state()->BroadcastNotification(kXNotificationSystemTrayStateChanged,
++                                          static_cast<uint8_t>(state));
++  }
+ }
+ 
+ void SystemManagementController::CallCommand(X_SMC_DATA* smc_message,
+diff --git a/src/xenia/kernel/smc.h b/src/xenia/kernel/smc.h
+index 4820e8ee51dfa5af57b62a8231ee326c0d63b0ac..44f0a0f7b7f1272bf842ad0770e187629a6240d5 100644
+--- a/src/xenia/kernel/smc.h
++++ b/src/xenia/kernel/smc.h
+@@ -221,7 +221,7 @@ class SystemManagementController {
+   std::array<uint8_t, 3> GetSMCVersion() const { return smc_version; }
+   X_DVD_TRAY_STATE GetTrayState() const { return dvd_tray_state_; }
+ 
+-  void SetTrayState(X_DVD_TRAY_STATE state);
++  void SetTrayState(X_DVD_TRAY_STATE state, bool notify = true);
+ 
+   void CallCommand(X_SMC_DATA* smc_message, X_SMC_DATA* smc_response);
+ 
+diff --git a/src/xenia/kernel/xam/xam_avatar.cc b/src/xenia/kernel/xam/xam_avatar.cc
+index ddc96f018d32845edaa39183a97c3a0c598f5ea3..0061b6386912c8190e40ce90e7909c87d756e480 100644
+--- a/src/xenia/kernel/xam/xam_avatar.cc
++++ b/src/xenia/kernel/xam/xam_avatar.cc
+@@ -67,6 +67,7 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
+         kernel_state()->xam_state()->GetUserProfile(user_index);
+ 
+     if (!user_profile) {
++      XELOGW("Dashboard avatar manifest: no selected profile");
+       extended_error = X_E_NO_SUCH_USER;
+       return X_ERROR_FUNCTION_FAILED;
+     }
+@@ -91,10 +92,12 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
+ 
+     // Profile doesn't have avatar info setting
+     if (!avatar_info_setting_data.data.data.binary.ptr) {
++      XELOGW("Dashboard avatar manifest: profile setting absent");
+       extended_error = X_E_FAIL;
+       return X_ERROR_FUNCTION_FAILED;
+     }
+ 
++    XELOGI("Dashboard avatar manifest: profile setting available");
+     return X_ERROR_SUCCESS;
+   };
+ 
+@@ -128,6 +131,7 @@ DECLARE_XAM_EXPORT1(XamAvatarGetManifestsByXuid, kAvatars, kStub)
+ dword_result_t XamAvatarGetAssetsResultSize_entry(
+     dword_t avatar_component_mask, lpdword_t result_buffer_size_ptr,
+     lpdword_t gpu_resource_buffer_size_ptr) {
++  XELOGW("Dashboard avatar asset size requested; handler returns zero");
+   *result_buffer_size_ptr = 0;
+   *gpu_resource_buffer_size_ptr = 0;
+ 
+@@ -140,6 +144,7 @@ dword_result_t XamAvatarGetAssets_entry(
+     dword_t avatar_component_mask, dword_t flags, lpdword_t result_buffer_ptr,
+     lpdword_t gpu_resource_buffer_ptr,
+     pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
++  XELOGW("Dashboard avatar assets requested; handler is incomplete");
+   // 58410907 doesn't crash if we return failure.
+   if (overlapped_ptr) {
+     kernel_state()->CompleteOverlappedImmediateEx(
+diff --git a/src/xenia/kernel/xam/xam_content.cc b/src/xenia/kernel/xam/xam_content.cc
+index 9ed9f97d8286811a2f1aada89d710301db1cb2aa..d1a160823364483d78be5d336ddc6afe92887ecb 100644
+--- a/src/xenia/kernel/xam/xam_content.cc
++++ b/src/xenia/kernel/xam/xam_content.cc
+@@ -7,6 +7,8 @@
+  ******************************************************************************
+  */
+ 
++#include <string_view>
++
+ #include "xenia/base/logging.h"
+ #include "xenia/base/math.h"
+ #include "xenia/base/string_util.h"
+@@ -297,11 +299,25 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
+                                   lpdword_t license_mask_ptr,
+                                   dword_t cache_size, qword_t content_size,
+                                   pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
++  // The dashboard uses this root for user content. Report which stage failed
++  // without logging package metadata, paths, or profile identifiers.
++  const bool dashboard_user_root =
++      root_name && std::string_view(root_name.value()) == "DASHUSER";
++  auto log_dashboard_user_failure = [dashboard_user_root, flags](
++                                        const char* stage, X_RESULT status) {
++    if (dashboard_user_root) {
++      XELOGW("Dashboard user content mount failed: stage={}, status={:08X}, "
++             "flags={:X}",
++             stage, status, flags.value());
++    }
++  };
++
+   uint64_t xuid = 0;
+   if (user_index != XUserIndexNone && user_index != XUserIndexAny) {
+     const auto& user = kernel_state()->xam_state()->GetUserProfile(user_index);
+ 
+     if (!user) {
++      log_dashboard_user_failure("profile", X_ERROR_NO_SUCH_USER);
+       return X_ERROR_NO_SUCH_USER;
+     }
+ 
+@@ -319,6 +335,7 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
+   }
+ 
+   if (kernel_state()->file_system()->IsSymbolicLinkRegistered(symlink_path)) {
++    log_dashboard_user_failure("root", X_ERROR_INVALID_PARAMETER);
+     return X_ERROR_INVALID_PARAMETER;
+   }
+ 
+@@ -326,6 +343,7 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
+   X_RESULT result =
+       ReadContentData(content_data_ptr, content_data_size, content_data);
+   if (result != X_ERROR_SUCCESS) {
++    log_dashboard_user_failure("metadata", result);
+     return result;
+   };
+ 
+@@ -341,8 +359,9 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
+ 
+   auto run = [content_manager, xuid, root_name = root_name.value(), flags,
+               content_data, content_data_size, disposition_ptr,
+-              license_mask_ptr, overlapped_ptr](uint32_t& extended_error,
+-                                                uint32_t& length) -> X_RESULT {
++              license_mask_ptr, overlapped_ptr,
++              log_dashboard_user_failure](uint32_t& extended_error,
++                                          uint32_t& length) -> X_RESULT {
+     X_RESULT result = X_ERROR_INVALID_PARAMETER;
+     kDispositionState disposition = kDispositionState::Unknown;
+     switch (flags & 0xF) {
+@@ -428,6 +447,10 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
+       *disposition_ptr = static_cast<uint32_t>(disposition);
+     }
+ 
++    if (result != X_ERROR_SUCCESS) {
++      log_dashboard_user_failure("operation", result);
++    }
++
+     if (result && overlapped_ptr) {
+       result = X_ERROR_FUNCTION_FAILED;
+     }
+@@ -450,6 +473,11 @@ dword_result_t XamContentCreateEx_entry(
+     pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+   auto content_data = *content_data_ptr.as<XCONTENT_DATA*>();
+   if (content_data.file_name_raw[0] == '\0') {
++    if (root_name && std::string_view(root_name.value()) == "DASHUSER") {
++      XELOGW("Dashboard user content mount failed: stage=filename, "
++             "status={:08X}, flags={:X}",
++             X_ERROR_INVALID_NAME, flags.value());
++    }
+     return X_ERROR_INVALID_NAME;
+   }
+   return xeXamContentCreate(user_index, root_name, content_data_ptr,
+@@ -475,6 +503,11 @@ dword_result_t XamContentCreateInternal_entry(
+     qword_t content_size, pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+   auto content_data_internal = *content_data_ptr.as<XCONTENT_DATA_INTERNAL*>();
+   if (content_data_internal.file_name_raw[0] == '\0') {
++    if (root_name && std::string_view(root_name.value()) == "DASHUSER") {
++      XELOGW("Dashboard user content mount failed: stage=filename, "
++             "status={:08X}, flags={:X}",
++             X_ERROR_INVALID_NAME, flags.value());
++    }
+     return X_ERROR_INVALID_NAME;
+   }
+   return xeXamContentCreate(XUserIndexNone, root_name, content_data_ptr,
+@@ -800,17 +833,39 @@ dword_result_t XamSwapDisc_entry(
+ DECLARE_XAM_EXPORT1(XamSwapDisc, kContent, kSketchy);
+ 
+ dword_result_t XamLoaderGetDvdTrayState_entry() {
++  if (kernel_state()->title_id() == kDashboardID) {
++    // The loader API uses 0 for ready/closed and 2 for open; these differ
++    // from the SMC's OPEN=0 and CLOSED=2 values. The guest gates disc actions
++    // on a zero (ready) result.
++    switch (kernel_state()->smc()->GetTrayState()) {
++      case X_DVD_TRAY_STATE::CLOSED:
++        return 0;
++      case X_DVD_TRAY_STATE::OPEN:
++        return 2;
++      case X_DVD_TRAY_STATE::OPENING:
++        return 3;
++      case X_DVD_TRAY_STATE::CLOSING:
++        return 4;
++      default:
++        return 1;
++    }
++  }
+   return static_cast<uint8_t>(kernel_state()->smc()->GetTrayState());
+ }
+ DECLARE_XAM_EXPORT1(XamLoaderGetDvdTrayState, kNone, kImplemented);
+ 
+ void XamLoaderGetMediaInfoEx_entry(lpdword_t media_type, lpdword_t title_id,
+                                    lpdword_t unk3) {
++  const bool dashboard = kernel_state()->title_id() == kDashboardID;
++  const uint32_t mounted_title =
++      kernel_state()->emulator()->dashboard_disc_title_id();
+   if (media_type) {
+-    *media_type = X_DVD_DISC_STATE::XBOX_360_GAME_DISC;
++    *media_type = dashboard && !mounted_title
++                      ? X_DVD_DISC_STATE::NO_DISC
++                      : X_DVD_DISC_STATE::XBOX_360_GAME_DISC;
+   }
+   if (title_id) {
+-    *title_id = 0;
++    *title_id = dashboard ? mounted_title : 0;
+   }
+   if (unk3) {
+     *unk3 = 0;
+diff --git a/src/xenia/kernel/xam/xam_info.cc b/src/xenia/kernel/xam/xam_info.cc
+index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87df8a56aa3 100644
+--- a/src/xenia/kernel/xam/xam_info.cc
++++ b/src/xenia/kernel/xam/xam_info.cc
+@@ -30,6 +30,7 @@
+ #include "xenia/ui/window.h"
+ #include "xenia/ui/windowed_app_context.h"
+ #include "xenia/xbox.h"
++#include "xenia/vfs/devices/disc_image_device.h"
+ 
+ #include "third_party/fmt/include/fmt/format.h"
+ #include "third_party/fmt/include/fmt/xchar.h"
+@@ -49,6 +50,9 @@ DEFINE_int32(avpack, 8,
+ DEFINE_bool(staging_mode, 0,
+             "Enables preview mode in dashboards to render debug information.",
+             "Kernel");
++DEFINE_bool(dashboard_local_uri, false,
++            "Experimental routing of dashboard games and apps library URIs.",
++            "Kernel");
+ 
+ namespace xe {
+ namespace kernel {
+@@ -477,6 +481,117 @@ dword_result_t XamLoaderGetLaunchData_entry(lpvoid_t buffer_ptr,
+ }
+ DECLARE_XAM_EXPORT1(XamLoaderGetLaunchData, kNone, kSketchy);
+ 
++dword_result_t XamLaunchURI_entry(dword_t user_index, lpvoid_t uri_ptr,
++                                dword_t flags, dword_t overlapped_ptr) {
++  // Only handle in-place dashboard navigation. Cross-title launches and the
++  // online URI resolver require separate implementations.
++  if (!cvars::dashboard_local_uri ||
++      kernel_state()->title_id() != kDashboardID || !(flags & 4)) {
++    return X_E_NOT_IMPLEMENTED;
++  }
++  if (!uri_ptr) {
++    return X_E_INVALIDARG;
++  }
++  const auto* uri = reinterpret_cast<const char*>(uri_ptr.host_address());
++  const size_t length = strnlen(uri, 0x3FC);
++  if (!length || length >= 0x3FB) {
++    return X_E_INVALIDARG;
++  }
++  const std::string_view request(uri, length);
++  const auto separator = request.find(':');
++  const auto scheme = request.substr(0, separator);
++  const auto arguments = separator == std::string_view::npos
++                             ? std::string_view()
++                             : request.substr(separator + 1);
++  uint32_t package_type = 0;
++  if (scheme == "gameslibrary") {
++    package_type = 1;
++  } else if (scheme == "applibrary") {
++    package_type = 2;
++  } else if (scheme == "contentlibrary") {
++    // The dashboard's Recents tile uses this alias directly, with its own
++    // SortOrder and _Quickplay arguments, rather than a package-type filter.
++  } else {
++    XELOGW("Dashboard URI scheme is outside the experimental library routes");
++    return X_E_NOT_IMPLEMENTED;
++  }
++
++  // Offline library aliases resolve to the dashboard's own embedded pages.
++  // Preserve caller parameters; the guest owns rendering and enumeration.
++  const std::string route =
++      "pam:BuiltIn.Hub.xzp:root:BuiltIn.ContentApp.xzp:contentlibrary:" +
++      (package_type ? fmt::format("PackageType={};{}", package_type, arguments)
++                    : std::string(arguments));
++  if (route.size() >= 0x3F0) {
++    return X_E_INSUFFICIENT_BUFFER;
++  }
++  auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
++  auto& launch_data = xam->loader_data().launch_data;
++  launch_data.assign(0x3FC, 0);
++  xe::store_and_swap<uint32_t>(launch_data.data() + 4, 12);
++  xe::store_and_swap<uint32_t>(launch_data.data() + 8, user_index);
++  std::memcpy(launch_data.data() + 12, route.data(), route.size());
++  // Dashboard URI notification: low word is the launch reason; high word is
++  // the user index. The dashboard reads the payload via GetLaunchData.
++  kernel_state()->BroadcastNotification(0x80040021,
++                                       (uint32_t(user_index) << 16) | 12);
++  XELOGI("Dashboard local library route queued (package type {})", package_type);
++  if (overlapped_ptr) {
++    kernel_state()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_SUCCESS);
++    return X_E_PENDING;
++  }
++  return X_E_SUCCESS;
++}
++DECLARE_XAM_EXPORT1(XamLaunchURI, kNone, kSketchy);
++
++dword_result_t XamLoaderLaunchTitleEx_entry(lpvoid_t image_path,
++                                          lpvoid_t mount_path,
++                                          lpvoid_t command_line,
++                                          dword_t flags) {
++  // Support only the dashboard's bare-disc request. Use the existing persistent
++  // loader handoff; the emulator cannot safely switch running titles in place.
++  if (kernel_state()->title_id() != kDashboardID || image_path || mount_path ||
++      command_line || (uint32_t(flags) & ~2u)) {
++    return X_E_NOT_IMPLEMENTED;
++  }
++  auto emulator = kernel_state()->emulator();
++  if (!emulator->dashboard_disc_title_id()) {
++    return X_E_NOTFOUND;
++  }
++  auto entry = kernel_state()->file_system()->ResolvePath("DVD:\\default.xex");
++  if (!entry || entry->device()->name() != "GDFX" ||
++      !entry->device()->mount_path().starts_with("\\Device\\DashboardDisc")) {
++    return X_E_NOTFOUND;
++  }
++  const auto* disc = static_cast<vfs::DiscImageDevice*>(entry->device());
++  auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
++  const auto previous = xam->loader_data();
++  auto& next = xam->loader_data();
++  next.host_path = xe::path_to_utf8(disc->host_path());
++  next.launch_path = "default.xex";
++  next.launch_flags = flags;
++  if (!xam->SaveLoaderData()) {
++    next = previous;
++    XELOGE("Dashboard disc launch handoff could not be saved");
++    return X_E_FAIL;
++  }
++  XELOGI("Dashboard disc launch prepared; backend restart required");
++  auto window = emulator->display_window();
++  auto drawer = emulator->imgui_drawer();
++  if (window && drawer) {
++    window->app_context().CallInUIThreadSynchronous([drawer]() {
++      xe::ui::ImGuiDialog::ShowMessageBox(
++          drawer, "Disc launch prepared",
++          "Close and reopen Xenia to launch the mounted game disc.\n"
++          "This experimental build requires a backend restart when changing "
++          "titles.");
++    });
++  }
++  // The requested title has not run yet. Do not report synchronous completion.
++  return X_E_PENDING;
++}
++DECLARE_XAM_EXPORT1(XamLoaderLaunchTitleEx, kNone, kSketchy);
++
+ void XamLoaderLaunchTitle_entry(lpstring_t raw_name_ptr, dword_t flags) {
+   auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
+ 
+diff --git a/src/xenia/kernel/xam/xam_module.cc b/src/xenia/kernel/xam/xam_module.cc
+index 9bc309756aea2f5f94b291b1547eaa4572690483..defe8d96e4866ae3995dc30e696d267303f5b163 100644
+--- a/src/xenia/kernel/xam/xam_module.cc
++++ b/src/xenia/kernel/xam/xam_module.cc
+@@ -10,6 +10,7 @@
+ #include "xenia/kernel/xam/xam_module.h"
+ 
+ #include "xenia/base/math.h"
++#include "xenia/emulator.h"
+ #include "xenia/kernel/kernel_state.h"
+ #include "xenia/kernel/xam/xam_private.h"
+ 
+@@ -63,7 +64,8 @@ void XamModule::RegisterExportTable(xe::cpu::ExportResolver* export_resolver) {
+ XamModule::~XamModule() {}
+ 
+ void XamModule::LoadLoaderData() {
+-  FILE* file = xe::filesystem::OpenFile(kXamModuleLoaderDataFileName, "rb");
++  const auto path = emulator_->storage_root() / kXamModuleLoaderDataFileName;
++  FILE* file = xe::filesystem::OpenFile(path, "rb");
+ 
+   if (!file) {
+     loader_data_.launch_data.clear();
+@@ -95,14 +97,15 @@ void XamModule::LoadLoaderData() {
+ 
+   fclose(file);
+   // We read launch data. Let's remove it till next request.
+-  std::filesystem::remove(kXamModuleLoaderDataFileName);
++  std::filesystem::remove(path);
+ }
+ 
+-void XamModule::SaveLoaderData() {
+-  FILE* file = xe::filesystem::OpenFile(kXamModuleLoaderDataFileName, "wb");
++bool XamModule::SaveLoaderData() {
++  const auto path = emulator_->storage_root() / kXamModuleLoaderDataFileName;
++  FILE* file = xe::filesystem::OpenFile(path, "wb");
+ 
+   if (!file) {
+-    return;
++    return false;
+   }
+ 
+   std::filesystem::path host_path = loader_data_.host_path;
+@@ -144,7 +147,14 @@ void XamModule::SaveLoaderData() {
+ 
+   fwrite(loader_data_.launch_data.data(), launch_data_size, 1, file);
+ 
+-  fclose(file);
++  const bool write_ok = !ferror(file);
++  const bool close_ok = fclose(file) == 0;
++  if (!write_ok || !close_ok) {
++    std::error_code error;
++    std::filesystem::remove(path, error);
++    return false;
++  }
++  return true;
+ }
+ 
+ }  // namespace xam
+diff --git a/src/xenia/kernel/xam/xam_module.h b/src/xenia/kernel/xam/xam_module.h
+index ec3bc8e87bd90e37f941c24550c0d026ce7fe5a5..7e30325a13184c567231f8e09ef668da00019069 100644
+--- a/src/xenia/kernel/xam/xam_module.h
++++ b/src/xenia/kernel/xam/xam_module.h
+@@ -40,7 +40,7 @@ class XamModule : public KernelModule {
+   };
+ 
+   void LoadLoaderData();
+-  void SaveLoaderData();
++  bool SaveLoaderData();
+ 
+   void SetLaunchCallback(uint32_t callback) { callback_ = callback; }
+ 
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
+index de577756c9659fd82b367f24218efdf405a24c41..fc93b78358f5cfc801ec287cb2739e928911e1b4 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
+@@ -11,7 +11,9 @@
+ 
+ #include "xenia/base/logging.h"
+ #include "xenia/base/platform.h"
++#include "xenia/emulator.h"
+ #include "xenia/kernel/kernel_state.h"
++#include "xenia/kernel/title_id_utils.h"
+ #include "xenia/kernel/util/shim_utils.h"
+ #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
+ 
+@@ -1018,6 +1020,24 @@ void XeCryptHmacSha_entry(lpvoid_t key, dword_t key_size_in, lpvoid_t inp_1,
+ }
+ DECLARE_XBOXKRNL_EXPORT1(XeCryptHmacSha, kNone, kImplemented);
+ 
++dword_result_t XeKeysGetMediaID_entry(lpvoid_t media_id, dword_t source) {
++  // The dashboard asks for the inserted disc's 16-byte XGD2 media ID with
++  // source 1. This is the security-header ID, not the 32-bit execution ID.
++  // Other sources and title contexts still need their own implementation.
++  if (!media_id) {
++    return X_STATUS_INVALID_PARAMETER;
++  }
++  if (source != 1 || kernel_state()->title_id() != kDashboardID) {
++    return X_STATUS_NOT_IMPLEMENTED;
++  }
++  if (!kernel_state()->emulator()->GetDashboardDiscMediaId(
++          media_id.as<uint8_t*>())) {
++    return X_STATUS_NOT_FOUND;
++  }
++  return X_STATUS_SUCCESS;
++}
++DECLARE_XBOXKRNL_EXPORT1(XeKeysGetMediaID, kNone, kSketchy);
++
+ dword_result_t XeKeysGetKeyProperties_entry(dword_t key) {
+   if (X_Key_Properties.contains(key)) {
+     auto& key_info = X_Key_Properties.at(key);
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
+index 2e6ecf539c0e88bb2a555ab025c8c90a4d0e90cd..3c228e15c7bf11d821c5694393cfcea0e59e0d61 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
+@@ -7,6 +7,8 @@
+  ******************************************************************************
+  */
+ 
++#include <functional>
++
+ #include "xenia/base/logging.h"
+ #include "xenia/kernel/info/file.h"
+ #include "xenia/kernel/kernel_state.h"
+@@ -86,6 +88,13 @@ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
+       (create_options & CreateOptions::FILE_DIRECTORY_FILE) != 0,
+       (create_options & CreateOptions::FILE_NON_DIRECTORY_FILE) != 0, &vfs_file,
+       &file_action);
++  if (target_path.starts_with("DASHUSER:")) {
++    XELOGI("Dashboard mount root probe: api=NtCreateFile, status={:08X}, "
++           "disposition={:X}, child={}, path_hash={:016X}",
++           result, creation_disposition.value(),
++           target_path.size() > sizeof("DASHUSER:") - 1,
++           std::hash<std::string>{}(target_path));
++  }
+   object_ref<XFile> file = nullptr;
+ 
+   X_HANDLE handle = X_INVALID_HANDLE_VALUE;
+@@ -496,6 +505,12 @@ dword_result_t NtQueryFullAttributesFile_entry(
+ 
+   // Resolve the file using the virtual file system.
+   auto entry = kernel_state()->file_system()->ResolvePath(target_path);
++  if (target_path.starts_with("DASHUSER:")) {
++    XELOGI("Dashboard mount root probe: api=NtQueryFullAttributesFile, "
++           "found={}, child={}, path_hash={:016X}",
++           entry != nullptr, target_path.size() > sizeof("DASHUSER:") - 1,
++           std::hash<std::string>{}(target_path));
++  }
+   if (entry) {
+     // Found.
+     file_info->creation_time = entry->create_timestamp();
+diff --git a/src/xenia/vfs/devices/disc_image_device.h b/src/xenia/vfs/devices/disc_image_device.h
+index 3b098944cacf67858c86765eccc8c05296ee58c5..d78808eb4c36cc98a4bec8e1faa6185cc5851715 100644
+--- a/src/xenia/vfs/devices/disc_image_device.h
++++ b/src/xenia/vfs/devices/disc_image_device.h
+@@ -34,6 +34,7 @@ class DiscImageDevice : public Device {
+   Entry* ResolvePath(const std::string_view path) override;
+ 
+   const std::string& name() const override { return name_; }
++  const std::filesystem::path& host_path() const { return host_path_; }
+   uint32_t attributes() const override { return 0; }
+   uint32_t component_name_max_length() const override { return 255; }
+ 

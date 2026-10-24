@@ -1,0 +1,2 @@
+# Preserve unified-diff bytes; blank context lines contain a required space.
+integrations/xenia-canary/*.patch -text -whitespace
