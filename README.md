@@ -2,7 +2,18 @@
 
 **Known limitations first: Game Details does not work, original avatar rendering/customization remains unresolved, and seamless dashboard/game switching is not implemented. Preferences also remains unsupported. This is experimental source, not a complete Xbox 360 operating-system emulator or a release.**
 
-This Xbox360 branch contains a source patch for Xenia Canary, build instructions, and a record of locally observed behavior. It does not contain the CPF inspector, a standalone frontend, firmware, dashboard assets, games, profiles, keys, logs, or compiled executables. You must supply your own lawful local research inputs separately.
+This Xbox360 branch contains the existing CPF Windows monitor/preservation module, its Rust build files and synthetic tests, browsable Xenia modifications, the reproducible upstream patch, and build/test documentation. It does not contain firmware, dashboard assets, games, profiles, keys, logs, or compiled executables. You must supply your own lawful local research inputs separately.
+
+## Browse the project
+
+| Directory | Contents |
+| --- | --- |
+| [apps/xbox360-monitor](apps/xbox360-monitor) | Complete existing Rust module: native monitor, firmware tools, library, validator, Cargo files and build script. |
+| [integrations/xenia-canary/source](integrations/xenia-canary/source) | Browsable copies of 17 changed Xenia source/header files and a source-only view of the new media-ID handler. |
+| [integrations/xenia-canary](integrations/xenia-canary) | Canonical patch, upstream license, source-layout notes and modification index. |
+| [tools/prepare-xenia.ps1](tools/prepare-xenia.ps1) | Prepare a separate pinned upstream checkout and apply the reviewed patch. |
+
+The optional `Xbox.exe` monitor observes Xenia externally. It does not launch the emulator or render a dashboard. The separate CPF Console Settings launcher integration is not included in this Xbox 360 module. No new standalone application or central launcher is introduced.
 
 ## What has been observed locally
 
@@ -35,7 +46,7 @@ The patch applies to [Xenia Canary](https://github.com/xenia-canary/xenia-canary
 
 Xenia is credited to its upstream authors and contributors. The patch retains upstream notices and is distributed under the same BSD 3-clause terms; see [LICENSE.xenia](integrations/xenia-canary/LICENSE.xenia). This work is an independent CPF experiment, not an upstream Xenia release or endorsement.
 
-The publication contains [cpf-dashboard.patch](integrations/xenia-canary/cpf-dashboard.patch), affecting 18 C++ source/header files. It includes dashboard routing, virtual-disc handling, restart handoff, keyboard event handling, content-root initialization, and targeted diagnostics. No proprietary binary, disassembly, key value, or private test fixture is included.
+The publication contains [cpf-dashboard.patch](integrations/xenia-canary/cpf-dashboard.patch), affecting 18 C++ source/header files. It includes dashboard routing, virtual-disc handling, restart handoff, keyboard event handling, content-root initialization, and targeted diagnostics. No proprietary firmware binary, private disassembly, key value, or private test fixture is included.
 
 ## Apply and build
 
@@ -71,6 +82,10 @@ python xenia-build.py build --config=release
 The handoff file is `launch_data.bin` under Xenia's storage root and contains local launch information. Keep it private, along with profiles and runtime logs. The patch adds limited redacted diagnostics, but **does not sanitize all upstream logging or crash reporting**. Do not upload raw logs or memory dumps.
 
 ## Validation and publication scope
+
+The published Rust module passed `cargo test --offline --locked`: 13 library tests and 4 monitor tests, with no failures. `cargo build --offline --locked --release --bin Xbox` also passed on Windows. These tests use synthetic fixtures and do not read console dumps. The resulting executable stays in the ignored local target directory and is not uploaded. No GUI or emulator was launched during this source-publication check.
+
+The Xenia preparation helper was checked against the existing pinned development checkout in `-CheckOnly` mode; it recognized all patch hunks without modifying that checkout. The 17 complete source views were compared with the development files after normalizing line endings; the handler-only view contains the exact new media-ID implementation. The source manifest is checked against the Git-staged publication bytes.
 
 The local source built successfully with Visual Studio 2022, the Vulkan SDK and `/Z7`; `git diff --check` passed. Rendering/input observations above came from controlled local tests. The final metadata-only build was compiled after removing the unsuccessful Game Details route; it was not relaunched after that removal. No stronger final-build runtime claim is made.
 

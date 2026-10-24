@@ -1,0 +1,11 @@
+# Local builds and explicitly selected user data never belong in source control.
+**/target/
+/build/
+/private-data/
+/imports/
+**/Xbox.exe
+**/Legacy_Xbox.exe
+**/*.log
+**/*.dmp
+**/launch_data.bin
+**/xbox360-library.json

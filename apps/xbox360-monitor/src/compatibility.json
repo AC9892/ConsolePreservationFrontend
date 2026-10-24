@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "dashboard_version": "2.0.17559.0",
+      "dashboard_generation": "Metro era",
+      "kernel_version": "17559 (dashboard executable version observed; full console/kernel fidelity not established)",
+      "required_files": [
+        "dash.xex and accompanying dashboard runtime files; full system application requirements remain unknown"
+      ],
+      "emulator_backend": "Xenia Canary",
+      "execution_status": "Partially Working",
+      "known_issues": [
+        "Game Details, original avatars, Preferences and seamless title switching remain unresolved.",
+        "My Games, My Apps and Recents pages render with the experimental local URI option; accurate history and installed-game enumeration remain incomplete.",
+        "DASHUSER mounts with a profile; two theme/effect child resources remain absent after retries.",
+        "Disc launching uses a backend restart; controller Y-eject was not reliably verified.",
+        "Xenia Canary does not provide complete retail NAND or Xbox 360 OS emulation."
+      ],
+      "last_tested_version": "Local CPF patch on Xenia Canary 2372a54105d9d598ab5bc7ba94a72ef1bea4b271 (2026-10-24); final metadata-only build compile-verified"
+    }
+  ]
+}
