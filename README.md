@@ -8,9 +8,9 @@ This Xbox360 branch contains the existing CPF Windows monitor/preservation modul
 
 | Directory | Contents |
 | --- | --- |
-| [apps/xbox360-monitor](apps/xbox360-monitor) | Complete existing Rust module: native monitor, firmware tools, library, validator, Cargo files and build script. |
-| [integrations/xenia-canary/source](integrations/xenia-canary/source) | Browsable copies of 17 changed Xenia source/header files and a source-only view of the new media-ID handler. |
-| [integrations/xenia-canary](integrations/xenia-canary) | Canonical patch, upstream license, source-layout notes and modification index. |
+| [monitor](monitor) | Complete existing Rust module: native monitor, firmware tools, library, validator, Cargo files and build script. |
+| [xenia](xenia) | Browsable copies of 17 changed Xenia source/header files and a source-only view of the new media-ID handler. |
+| [patches](patches) | Canonical patch for the pinned upstream revision. |
 | [tools/prepare-xenia.ps1](tools/prepare-xenia.ps1) | Prepare a separate pinned upstream checkout and apply the reviewed patch. |
 
 The optional `Xbox.exe` monitor observes Xenia externally. It does not launch the emulator or render a dashboard. The separate CPF Console Settings launcher integration is not included in this Xbox 360 module. No new standalone application or central launcher is introduced.
@@ -44,9 +44,9 @@ These are development observations from a limited test setup, not a compatibilit
 
 The patch applies to [Xenia Canary](https://github.com/xenia-canary/xenia-canary), upstream revision `2372a54105d9d598ab5bc7ba94a72ef1bea4b271` from `canary_experimental`.
 
-Xenia is credited to its upstream authors and contributors. The patch retains upstream notices and is distributed under the same BSD 3-clause terms; see [LICENSE.xenia](integrations/xenia-canary/LICENSE.xenia). This work is an independent CPF experiment, not an upstream Xenia release or endorsement.
+Xenia is credited to its upstream authors and contributors. The patch retains upstream notices and is distributed under the same BSD 3-clause terms; see [LICENSE.xenia](xenia/LICENSE.xenia). This work is an independent CPF experiment, not an upstream Xenia release or endorsement.
 
-The publication contains [cpf-dashboard.patch](integrations/xenia-canary/cpf-dashboard.patch), affecting 18 C++ source/header files. It includes dashboard routing, virtual-disc handling, restart handoff, keyboard event handling, content-root initialization, and targeted diagnostics. No proprietary firmware binary, private disassembly, key value, or private test fixture is included.
+The publication contains [cpf-dashboard.patch](patches/cpf-dashboard.patch), affecting 18 C++ source/header files. It includes dashboard routing, virtual-disc handling, restart handoff, keyboard event handling, content-root initialization, and targeted diagnostics. No proprietary firmware binary, private disassembly, key value, or private test fixture is included.
 
 ## Apply and build
 

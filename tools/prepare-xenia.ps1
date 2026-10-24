@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $revision = '2372a54105d9d598ab5bc7ba94a72ef1bea4b271'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$patchPath = Join-Path $projectRoot 'integrations\xenia-canary\cpf-dashboard.patch'
+$patchPath = Join-Path $projectRoot 'patches\cpf-dashboard.patch'
 $sourcePath = [System.IO.Path]::GetFullPath($SourceDirectory)
 
 if (-not (Test-Path -LiteralPath $patchPath -PathType Leaf)) {

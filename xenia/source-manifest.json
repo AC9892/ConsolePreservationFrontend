@@ -1,114 +1,114 @@
 {
   "upstream": "https://github.com/xenia-canary/xenia-canary",
   "revision": "2372a54105d9d598ab5bc7ba94a72ef1bea4b271",
-  "canonical_patch": "cpf-dashboard.patch",
+  "canonical_patch": "../patches/cpf-dashboard.patch",
   "patch_sha256": "fa520cf210b707bf47b63b060b1e0e6b89324d21f56262720c9fcdf8a8207697",
   "files": [
     {
       "upstream_path": "src/xenia/app/emulator_window.cc",
-      "source_view": "source/src/xenia/app/emulator_window.cc",
+      "source_view": "app/emulator_window.cc",
       "view_kind": "complete modified file",
       "sha256": "47bb0b616f0c0a4493b5206725e54d957dd69faeb4bca584a221b782256f8b32"
     },
     {
       "upstream_path": "src/xenia/app/emulator_window.h",
-      "source_view": "source/src/xenia/app/emulator_window.h",
+      "source_view": "app/emulator_window.h",
       "view_kind": "complete modified file",
       "sha256": "ec2cc094ed5c0acebf3704a7f00710359da068eea73ace2100882e1be17d57d7"
     },
     {
       "upstream_path": "src/xenia/app/xenia_main.cc",
-      "source_view": "source/src/xenia/app/xenia_main.cc",
+      "source_view": "app/xenia_main.cc",
       "view_kind": "complete modified file",
       "sha256": "427660a7ec9cecd6ee1d91695611119bf8da9da5f3049047625978d86ada41a2"
     },
     {
       "upstream_path": "src/xenia/cpu/backend/x64/x64_emitter.cc",
-      "source_view": "source/src/xenia/cpu/backend/x64/x64_emitter.cc",
+      "source_view": "cpu/backend/x64/x64_emitter.cc",
       "view_kind": "complete modified file",
       "sha256": "da146c84c1ea30c1b1f10043e26fc0fe6ca1dbe4a38d24644f354d9e0a34b0e1"
     },
     {
       "upstream_path": "src/xenia/emulator.cc",
-      "source_view": "source/src/xenia/emulator.cc",
+      "source_view": "emulator.cc",
       "view_kind": "complete modified file",
       "sha256": "4a3dbad59795ff8a9a69d1ab4e4c1bb37315ecb2486ce6e25af1de6fbac4b7b8"
     },
     {
       "upstream_path": "src/xenia/emulator.h",
-      "source_view": "source/src/xenia/emulator.h",
+      "source_view": "emulator.h",
       "view_kind": "complete modified file",
       "sha256": "1a8fcb9248d01308ed5b36ccce5e059fc279d17a428b54aec9240a5768e02620"
     },
     {
       "upstream_path": "src/xenia/hid/keyboard/keyboard_input_driver.cc",
-      "source_view": "source/src/xenia/hid/keyboard/keyboard_input_driver.cc",
+      "source_view": "hid/keyboard/keyboard_input_driver.cc",
       "view_kind": "complete modified file",
       "sha256": "b32296bac6dee358999c42627cb33169d8c41be9307058d170076169892e4a31"
     },
     {
       "upstream_path": "src/xenia/hid/keyboard/keyboard_input_driver.h",
-      "source_view": "source/src/xenia/hid/keyboard/keyboard_input_driver.h",
+      "source_view": "hid/keyboard/keyboard_input_driver.h",
       "view_kind": "complete modified file",
       "sha256": "af6a5f9069930e143ad1ac07e235247a7274328bc6bf37fca9d751154528a113"
     },
     {
       "upstream_path": "src/xenia/kernel/smc.cc",
-      "source_view": "source/src/xenia/kernel/smc.cc",
+      "source_view": "kernel/smc.cc",
       "view_kind": "complete modified file",
       "sha256": "659ec486213648d2edff47419da9334a48a41281beac3458f84a7dbdff382717"
     },
     {
       "upstream_path": "src/xenia/kernel/smc.h",
-      "source_view": "source/src/xenia/kernel/smc.h",
+      "source_view": "kernel/smc.h",
       "view_kind": "complete modified file",
       "sha256": "a45b0f9986dcd1aff8e452be254642c2033b2ed53f4dc69dd3f7baf018512b44"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_avatar.cc",
-      "source_view": "source/src/xenia/kernel/xam/xam_avatar.cc",
+      "source_view": "kernel/xam/xam_avatar.cc",
       "view_kind": "complete modified file",
       "sha256": "f9b40f061423e31dc459b56d1b326a3b7745c593654b16d7f6276fc03a34110a"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_content.cc",
-      "source_view": "source/src/xenia/kernel/xam/xam_content.cc",
+      "source_view": "kernel/xam/xam_content.cc",
       "view_kind": "complete modified file",
       "sha256": "1b16c6d8cd5ff5cae4bd9fd88854cd1bf983ccc65d66f8dbd4b86c83868c14f5"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_info.cc",
-      "source_view": "source/src/xenia/kernel/xam/xam_info.cc",
+      "source_view": "kernel/xam/xam_info.cc",
       "view_kind": "complete modified file",
       "sha256": "424ec4f0cdf1b566eb0653c0ea4614a29861c2fd8b14c48f8a4f4961cd31db5d"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_module.cc",
-      "source_view": "source/src/xenia/kernel/xam/xam_module.cc",
+      "source_view": "kernel/xam/xam_module.cc",
       "view_kind": "complete modified file",
       "sha256": "bd37808dc205f2490b5d95614d77d8c6dcd2e861cd18b58f595f3f5690ce3135"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_module.h",
-      "source_view": "source/src/xenia/kernel/xam/xam_module.h",
+      "source_view": "kernel/xam/xam_module.h",
       "view_kind": "complete modified file",
       "sha256": "5883a8867d7c39855012e59e684f19a81f53e83abc2e5ebb4a854521fcd54b99"
     },
     {
       "upstream_path": "src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc",
-      "source_view": "source/extensions/xboxkrnl_media_id.cc",
+      "source_view": "extensions/xboxkrnl_media_id.cc",
       "view_kind": "CPF handler only",
       "sha256": "a5f9521e5850beabb2f971f09f43086d8bf965006cc30e73e2e9a149f237a0e5"
     },
     {
       "upstream_path": "src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc",
-      "source_view": "source/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc",
+      "source_view": "kernel/xboxkrnl/xboxkrnl_io.cc",
       "view_kind": "complete modified file",
       "sha256": "a39efbace155e46085f361f52e206d86d925ecc0882b397b0f6932298760b74c"
     },
     {
       "upstream_path": "src/xenia/vfs/devices/disc_image_device.h",
-      "source_view": "source/src/xenia/vfs/devices/disc_image_device.h",
+      "source_view": "vfs/devices/disc_image_device.h",
       "view_kind": "complete modified file",
       "sha256": "28a64c3b7dd01c6887e8f8b8a65010fac685d46fa76c4ac2eb89b4f31595cb8f"
     }
