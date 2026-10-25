@@ -22,6 +22,11 @@ pub enum Error {
     ServerNotFound,
     Busy,
 }
+#[derive(Debug, PartialEq, Eq)]
+pub enum CreateWithOutputError<E> {
+    Registry(Error),
+    Output(E),
+}
 #[derive(Serialize)]
 pub struct Session {
     pub owner: u32,
@@ -90,6 +95,25 @@ impl Kernel {
                 descriptor,
             },
         );
+        Ok(id)
+    }
+    /// The writer must leave its result untouched when it returns an error.
+    pub fn create_with_output<E>(
+        &mut self,
+        owner: u32,
+        implementation: u64,
+        service: String,
+        descriptor: CreateDescriptor,
+        write_result: impl FnOnce(u32) -> Result<(), E>,
+    ) -> Result<u32, CreateWithOutputError<E>> {
+        let id = self
+            .create(owner, implementation, service, descriptor)
+            .map_err(CreateWithOutputError::Registry)?;
+        if let Err(error) = write_result(id) {
+            self.clients.remove(&id);
+            self.next_handle = id;
+            return Err(CreateWithOutputError::Output(error));
+        }
         Ok(id)
     }
     pub fn client(&self, owner: u32, handle: u32) -> Result<&Client, Error> {
@@ -339,5 +363,54 @@ mod tests {
             kernel.create(0, 0x1234, "Test".into(), config()),
             Err(Error::InvalidRequest)
         );
+    }
+    #[test]
+    fn create_with_output_commits_on_success_and_rolls_back_on_writer_error() {
+        let mut kernel = Kernel::new(2);
+        let mut result = u32::MAX;
+        let id = kernel
+            .create_with_output(10, 0x1234, "TestService".into(), config(), |id| {
+                result = id;
+                Ok::<(), &'static str>(())
+            })
+            .unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(result, id);
+        assert_eq!(kernel.client(10, id).unwrap().service, "TestService");
+
+        kernel.destroy(10, id).unwrap();
+        result = u32::MAX;
+        assert_eq!(
+            kernel.create_with_output(10, 0x5678, "Other".into(), config(), |_id| {
+                Err("result output refused")
+            }),
+            Err(CreateWithOutputError::Output("result output refused"))
+        );
+        assert_eq!(result, u32::MAX);
+        assert!(kernel.is_empty());
+        let reused = kernel
+            .create(10, 0x9abc, "Replacement".into(), config())
+            .unwrap();
+        assert_eq!(reused, id + 1);
+    }
+    #[test]
+    fn create_with_output_does_not_call_writer_when_registry_rejects() {
+        let mut kernel = Kernel::new(1);
+        let id = kernel
+            .create(10, 0x1234, "TestService".into(), config())
+            .unwrap();
+        let mut result = u32::MAX;
+        let mut called = false;
+        assert_eq!(
+            kernel.create_with_output(20, 0x5678, "Other".into(), config(), |_id| {
+                called = true;
+                result = 0;
+                Ok::<(), &'static str>(())
+            }),
+            Err(CreateWithOutputError::Registry(Error::Capacity))
+        );
+        assert!(!called);
+        assert_eq!(result, u32::MAX);
+        assert!(kernel.client(10, id).is_ok());
     }
 }

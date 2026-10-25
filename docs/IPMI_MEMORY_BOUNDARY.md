@@ -34,3 +34,17 @@ error and operation-result channels. Unknown operations must remain unsupported.
 The read callback alone does not establish an atomic guest-memory snapshot;
 a backend caller must coordinate mappings and concurrent guest writes as needed.
 No process authorization or authentic service behavior is supplied here.
+
+## Synthetic client-result transaction
+
+The component harness now uses `Kernel::create_with_output` for operation 2.
+It validates the result range before decoding inputs and revalidates it at
+the final handle write. If the writer refuses, the registry removes the new
+client and restores the unconsumed handle. A rejected registry creation never
+invokes the writer. Tests cover commit, rollback/reuse and registry rejection.
+
+The writer must leave the output untouched when returning an error. This
+callback contract does not make arbitrary guest writes atomic or protect a
+real backend mapping against concurrent changes. Transport errno remains
+separate from the four-byte operation result; unknown guest error mappings
+remain unsupported. The original logger still stops at its missing server.

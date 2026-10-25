@@ -39,7 +39,7 @@ The output parent must exist and reports must remain outside the dump. Native co
 
 ## Validation and remaining work
 
-The current component build, 27 component tests and all-target Clippy passed. The current input-decoder refactor passed 32 transport workers and nine logger probes at their exact expected boundaries (41 controlled workers total, no timeouts), using the existing independently authored validation scripts. Firmware-dependent evidence remains private and is not bundled.
+The current component build, 29 component tests and all-target Clippy passed. The client-result transaction checkpoint passed 32 transport workers and nine logger probes at their exact expected boundaries (41 controlled workers total, no timeouts), using the existing independently authored validation scripts. Firmware-dependent evidence remains private and is not bundled.
 
 Provider research additionally has six synthetic analyzer regression checks. The latest transport-script update adds explicit early-stage failure and cleanup assertions and passed 16 focused worker runs against the unchanged component binary. These checks do not establish an authentic running service.
 

@@ -1153,16 +1153,30 @@ mod native {
         let request = input.request;
         let descriptor = input.descriptor;
         let name = input.service;
-        let id = CLIENTS
-            .with(|clients| {
-                clients
-                    .borrow_mut()
-                    .create(1, request.client_impl, name.clone(), descriptor)
-            })
-            .unwrap_or_else(|error| stop(&format!("Client registry rejected creation: {error:?}")));
-        unsafe {
-            (output as *mut u32).write_unaligned(id);
-        }
+        let id = CLIENTS.with(|clients| {
+            clients.borrow_mut().create_with_output(
+                1,
+                request.client_impl,
+                name.clone(),
+                descriptor,
+                |id| {
+                    if !can_access(output, 4, true) {
+                        return Err("Client result output is no longer writable");
+                    }
+                    unsafe {
+                        (output as *mut u32).write_unaligned(id);
+                    }
+                    Ok(())
+                },
+            )
+        });
+        let id = match id {
+            Ok(id) => id,
+            Err(crate::ipmi_kernel::CreateWithOutputError::Registry(error)) => {
+                stop(&format!("Client registry rejected creation: {error:?}"))
+            }
+            Err(crate::ipmi_kernel::CreateWithOutputError::Output(error)) => stop(error),
+        };
         let client = CLIENTS
             .with(|clients| serde_json::to_value(clients.borrow().client(1, id).unwrap()).unwrap());
         event(

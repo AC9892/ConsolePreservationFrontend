@@ -34,7 +34,7 @@ The opt-in strncpy bridge accepts at most 256 bytes, validates the complete writ
 
 ## Next work
 
-The current concrete boundary is a missing authentic service provider, not a successful connection. All nine logger probes and 32 transport workers passed against the current input-decoder refactor using the existing independently authored validation scripts; 27 component tests and all-target Clippy passed. No successful logger initialize return or original logger teardown is claimed.
+The current concrete boundary is a missing authentic service provider, not a successful connection. All nine logger probes and 32 transport workers passed against the client-result transaction checkpoint using the existing independently authored validation scripts; 29 component tests and all-target Clippy passed. No successful logger initialize return or original logger teardown is claimed.
 
 `tools/analyze_logger_provider.py ORIGINAL_SHELLCORE` records hash-pinned static provider startup evidence as JSON on stdout. It verifies server creation at module-relative `0x4f2938`, worker entry `0x4f2ea0` calling server vtable slot `+0x10`, and the internal thread-setup wrapper. The original setup requests a 32768-byte stack and scheduling parameter 766 and imports PS4 thread attribute, scheduling, creation and exit APIs. Raw instruction reports belong outside the dump and must remain private.
 
