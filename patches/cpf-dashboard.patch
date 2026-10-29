@@ -1,8 +1,28 @@
 diff --git a/src/xenia/app/emulator_window.cc b/src/xenia/app/emulator_window.cc
-index fbd2f98640f2caeaaf48739afacb9095124db9f6..b00bdf9f227b4942379f8a643c6c4fa3ea801c46 100644
+index fbd2f9864..4b32b7156 100644
 --- a/src/xenia/app/emulator_window.cc
 +++ b/src/xenia/app/emulator_window.cc
-@@ -761,6 +761,12 @@ bool EmulatorWindow::Initialize() {
+@@ -211,6 +211,7 @@ std::unique_ptr<EmulatorWindow> EmulatorWindow::Create(
+ }
+ 
+ EmulatorWindow::~EmulatorWindow() {
++  StopControllerHotkeys();
+   // Notify the ImGui drawer that the immediate drawer is being destroyed.
+   ShutdownGraphicsSystemPresenterPainting();
+ }
+@@ -280,7 +281,10 @@ void EmulatorWindow::OnEmulatorInitialized() {
+   }
+ 
+   // Create a thread to listen for controller hotkeys.
+-  if (cvars::controller_hotkeys) {
++  if (cvars::controller_hotkeys && !Gamepad_HotKeys_Listener) {
++    controller_hotkeys_stop_requested_.store(false);
++    controller_hotkeys_callbacks_alive_ =
++        std::make_shared<std::atomic<bool>>(true);
+     Gamepad_HotKeys_Listener =
+         threading::Thread::Create({}, [&] { GamepadHotKeys(); });
+     Gamepad_HotKeys_Listener->set_name("Gamepad HotKeys Listener");
+@@ -761,6 +765,12 @@ bool EmulatorWindow::Initialize() {
          MenuItem::Create(MenuItem::Type::kString, "&Open...", "Ctrl+O",
                           std::bind(&EmulatorWindow::FileOpen, this)));
      file_menu->AddChild(std::move(recent_menu));
@@ -15,7 +35,7 @@ index fbd2f98640f2caeaaf48739afacb9095124db9f6..b00bdf9f227b4942379f8a643c6c4fa3
      file_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
      zar_menu->AddChild(
          MenuItem::Create(MenuItem::Type::kString, "Create",
-@@ -1258,6 +1264,35 @@ void EmulatorWindow::FileDrop(const std::filesystem::path& path) {
+@@ -1258,6 +1268,35 @@ void EmulatorWindow::FileDrop(const std::filesystem::path& path) {
    RunTitle(path);
  }
  
@@ -51,11 +71,197 @@ index fbd2f98640f2caeaaf48739afacb9095124db9f6..b00bdf9f227b4942379f8a643c6c4fa3
  void EmulatorWindow::FileOpen() {
    std::filesystem::path path;
  
+@@ -1969,22 +2008,22 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
+ 
+   switch (button_combination.function) {
+     case ButtonFunctions::ToggleFullscreen:
+-      app_context().CallInUIThread([this]() { ToggleFullscreen(); });
++      QueueControllerHotkeyAction([this]() { ToggleFullscreen(); });
+ 
+       // Extra Sleep
+       xe::threading::Sleep(delay);
+       break;
+     case ButtonFunctions::RunTitle: {
+-      if (selected_title_index == -1) {
+-        selected_title_index++;
+-      }
+-
+-      if (selected_title_index < recently_launched_titles_.size()) {
+-        app_context().CallInUIThread([this]() {
++      QueueControllerHotkeyAction([this]() {
++        if (selected_title_index == -1) {
++          selected_title_index = 0;
++        }
++        if (selected_title_index >= 0 &&
++            size_t(selected_title_index) < recently_launched_titles_.size()) {
+           RunTitle(
+               recently_launched_titles_[selected_title_index].path_to_file);
+-        });
+-      }
++        }
++      });
+     } break;
+     case ButtonFunctions::ClearMemoryPageState:
+       ToggleGPUSetting(GPUSetting::ClearMemoryPageState);
+@@ -2056,10 +2095,10 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
+       xe::threading::Sleep(delay);
+     } break;
+     case ButtonFunctions::IncTitleSelect:
+-      selected_title_index++;
++      QueueControllerHotkeyAction([this]() { SelectRecentTitleFromHotkey(1); });
+       break;
+     case ButtonFunctions::DecTitleSelect:
+-      selected_title_index--;
++      QueueControllerHotkeyAction([this]() { SelectRecentTitleFromHotkey(-1); });
+       break;
+     case ButtonFunctions::ToggleLogging: {
+       logging::ToggleLogLevel();
+@@ -2074,39 +2113,8 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
+       break;
+   }
+ 
+-  if ((button_combination.function == ButtonFunctions::IncTitleSelect ||
+-       button_combination.function == ButtonFunctions::DecTitleSelect) &&
+-      recently_launched_titles_.size() > 0) {
+-    selected_title_index =
+-        std::clamp(selected_title_index, 0,
+-                   static_cast<int32_t>(recently_launched_titles_.size() - 1));
+-
+-    // Must clear dialogs to prevent stacking
+-    ClearDialogs();
+-
+-    // Titles may contain Unicode characters such as At World’s End
+-    // Must use ImGUI font that can render these Unicode characters
+-    std::string title_name;
+-
+-    // Use filename if title name is empty
+-    if (recently_launched_titles_[selected_title_index].title_name.empty()) {
+-      title_name = recently_launched_titles_[selected_title_index]
+-                       .path_to_file.filename()
+-                       .string();
+-    } else {
+-      title_name = recently_launched_titles_[selected_title_index].title_name;
+-    }
+-
+-    std::string title = fmt::format(
+-        "{}: {}\n\n{}", selected_title_index + 1, title_name,
+-        controller_hotkey_map.find(X_INPUT_GAMEPAD_START)->second.pretty);
+-
+-    xe::ui::ImGuiDialog::ShowMessageBox(imgui_drawer_.get(), "Title Selection",
+-                                        title);
+-  }
+-
+   if (!notificationTitle.empty()) {
+-    app_context_.CallInUIThread(
++    QueueControllerHotkeyAction(
+         [imgui_drawer = imgui_drawer(), notificationTitle, notificationDesc]() {
+           new xe::ui::HostNotificationWindow(imgui_drawer, notificationTitle,
+                                              notificationDesc, 0);
+@@ -2140,6 +2148,51 @@ void EmulatorWindow::VibrateController(xe::hid::InputSystem* input_sys,
+   }
+ }
+ 
++void EmulatorWindow::SelectRecentTitleFromHotkey(int delta) {
++  assert_true(app_context_.IsInUIThread());
++  if (recently_launched_titles_.empty()) {
++    return;
++  }
++  selected_title_index = std::clamp(
++      selected_title_index + delta, 0,
++      static_cast<int32_t>(recently_launched_titles_.size() - 1));
++  ClearDialogs();
++  const auto& entry = recently_launched_titles_[selected_title_index];
++  const std::string title_name = entry.title_name.empty()
++                                     ? entry.path_to_file.filename().string()
++                                     : entry.title_name;
++  const auto start = controller_hotkey_map.find(X_INPUT_GAMEPAD_START);
++  const std::string title = fmt::format(
++      "{}: {}\n\n{}", selected_title_index + 1, title_name,
++      start != controller_hotkey_map.end() ? start->second.pretty : "");
++  xe::ui::ImGuiDialog::ShowMessageBox(imgui_drawer_.get(), "Title Selection",
++                                    title);
++}
++
++void EmulatorWindow::QueueControllerHotkeyAction(std::function<void()> action) {
++  auto alive = controller_hotkeys_callbacks_alive_;
++  app_context_.CallInUIThread([alive, action = std::move(action)]() {
++    if (alive->load()) {
++      action();
++    }
++  });
++}
++
++void EmulatorWindow::StopControllerHotkeys() {
++  assert_true(app_context_.IsInUIThread());
++  controller_hotkeys_callbacks_alive_->store(false);
++  controller_hotkeys_stop_requested_.store(true);
++  if (Gamepad_HotKeys_Listener) {
++    if (xe::threading::Wait(Gamepad_HotKeys_Listener.get(), false) !=
++        xe::threading::WaitResult::kSuccess) {
++      // A failed wait is not evidence that the cached input-system pointer is
++      // no longer in use. Fail closed before destroying any of its owners.
++      xe::FatalError("Controller hotkey worker shutdown could not be confirmed.");
++    }
++    Gamepad_HotKeys_Listener.reset();
++  }
++}
++
+ void EmulatorWindow::GamepadHotKeys() {
+   X_INPUT_STATE state;
+ 
+@@ -2148,7 +2201,7 @@ void EmulatorWindow::GamepadHotKeys() {
+   auto input_sys = emulator_->input_system();
+ 
+   if (input_sys) {
+-    while (true) {
++    while (!controller_hotkeys_stop_requested_.load()) {
+       // Collect controller states while holding the lock
+       std::array<std::pair<bool, X_INPUT_STATE>, XUserMaxUserCount>
+           controller_states;
+@@ -2165,6 +2218,9 @@ void EmulatorWindow::GamepadHotKeys() {
+       // Process hotkeys without holding the lock
+       for (uint32_t user_index = 0; user_index < XUserMaxUserCount;
+            ++user_index) {
++        if (controller_hotkeys_stop_requested_.load()) {
++          break;
++        }
+         if (controller_states[user_index].first) {
+           if (ProcessControllerHotkey(
+                   controller_states[user_index].second.gamepad.buttons)
 diff --git a/src/xenia/app/emulator_window.h b/src/xenia/app/emulator_window.h
-index cc085b60c274dfbe7ac31061aed59e8a3098b1a6..09a3cbfe326c9231b52addda067cf7ab09e10f31 100644
+index cc085b60c..823ffdd5d 100644
 --- a/src/xenia/app/emulator_window.h
 +++ b/src/xenia/app/emulator_window.h
-@@ -267,6 +267,8 @@ class EmulatorWindow {
+@@ -10,6 +10,8 @@
+ #ifndef XENIA_APP_EMULATOR_WINDOW_H_
+ #define XENIA_APP_EMULATOR_WINDOW_H_
+ 
++#include <atomic>
++#include <functional>
+ #include <memory>
+ #include <string>
+ 
+@@ -61,6 +63,10 @@ class EmulatorWindow {
+ 
+   std::unique_ptr<xe::threading::Thread> Gamepad_HotKeys_Listener;
+ 
++  // Call on the UI thread while the input backend is still alive. This joins
++  // the polling worker and cancels its queued UI callbacks.
++  void StopControllerHotkeys();
++
+   int32_t selected_title_index = -1;
+ 
+   static constexpr int64_t diff_in_ms(
+@@ -244,6 +250,8 @@ class EmulatorWindow {
+                           uint32_t height);
+ 
+   bool Initialize();
++  void QueueControllerHotkeyAction(std::function<void()> action);
++  void SelectRecentTitleFromHotkey(int delta);
+ 
+   // For comparisons, use GetSwapPostEffectForCvarValue instead as the default
+   // fallback may be used for multiple values.
+@@ -267,6 +275,8 @@ class EmulatorWindow {
    void FileDrop(const std::filesystem::path& filename);
    void OnMouseUp(const ui::MouseEvent& e);
    void FileOpen();
@@ -64,8 +270,20 @@ index cc085b60c274dfbe7ac31061aed59e8a3098b1a6..09a3cbfe326c9231b52addda067cf7ab
    void FileClose();
    void InstallContent();
    void ExtractZarchive();
+@@ -316,6 +326,11 @@ class EmulatorWindow {
+ 
+   bool emulator_initialized_ = false;
+   std::atomic<bool> disable_hotkeys_ = false;
++  std::atomic<bool> controller_hotkeys_stop_requested_{false};
++  // Each listener generation owns a token. Queued UI work may outlive the
++  // listener/window but must not touch either after this token is invalidated.
++  std::shared_ptr<std::atomic<bool>> controller_hotkeys_callbacks_alive_ =
++      std::make_shared<std::atomic<bool>>(false);
+ 
+   std::string base_title_;
+   bool initializing_shader_storage_ = false;
 diff --git a/src/xenia/app/xenia_main.cc b/src/xenia/app/xenia_main.cc
-index 9777dc6e16f61cf4cc4aadc1c0c0ec3183e526e6..32d8ddbd65620321353ed6da79d2163a7f41b04e 100644
+index 9777dc6e1..0764aabab 100644
 --- a/src/xenia/app/xenia_main.cc
 +++ b/src/xenia/app/xenia_main.cc
 @@ -9,9 +9,11 @@
@@ -95,8 +313,18 @@ index 9777dc6e16f61cf4cc4aadc1c0c0ec3183e526e6..32d8ddbd65620321353ed6da79d2163a
    std::filesystem::path cache_root = cvars::cache_root;
    if (cache_root.empty()) {
      cache_root = storage_root / "cache_host";
+@@ -564,6 +574,9 @@ bool EmulatorApp::OnInitialize() {
+ }
+ 
+ void EmulatorApp::OnDestroy() {
++  if (emulator_window_) {
++    emulator_window_->StopControllerHotkeys();
++  }
+   ShutdownEmulatorThreadFromUIThread();
+ 
+   if (cvars::discord) {
 diff --git a/src/xenia/cpu/backend/x64/x64_emitter.cc b/src/xenia/cpu/backend/x64/x64_emitter.cc
-index 694c92b4ea6f4a61003f1608b555a3d91724532c..f9bc7a2d0f6d6fc01356ea06e8991c5dc9e6cc5d 100644
+index 694c92b4e..f9bc7a2d0 100644
 --- a/src/xenia/cpu/backend/x64/x64_emitter.cc
 +++ b/src/xenia/cpu/backend/x64/x64_emitter.cc
 @@ -787,6 +787,24 @@ void X64Emitter::CallIndirect(const hir::Instr* instr,
@@ -124,8 +352,34 @@ index 694c92b4ea6f4a61003f1608b555a3d91724532c..f9bc7a2d0f6d6fc01356ea06e8991c5d
    if (!cvars::ignore_undefined_externs) {
      xe::FatalError(fmt::format("undefined extern call to {:08X} {}",
                                 function->address(), function->name().c_str()));
+diff --git a/src/xenia/cpu/xex_module.cc b/src/xenia/cpu/xex_module.cc
+index c72818924..4b4bf2bec 100644
+--- a/src/xenia/cpu/xex_module.cc
++++ b/src/xenia/cpu/xex_module.cc
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include "xenia/cpu/xex_module.h"
++#include "xenia/cpu/xex_crypto.h"
+ 
+ #include "third_party/fmt/include/fmt/format.h"
+ 
+@@ -89,6 +90,13 @@ namespace cpu {
+ 
+ using xe::kernel::KernelState;
+ 
++void UnwrapRetailXex2ImageKey(const uint8_t* wrapped, uint8_t* output) {
++  uint8_t result[16];
++  aes_decrypt_buffer(xe_xex2_retail_key, wrapped, sizeof(result), result,
++                     sizeof(result));
++  std::memcpy(output, result, sizeof(result));
++}
++
+ XexModule::XexModule(Processor* processor, KernelState* kernel_state)
+     : Module(processor), kernel_state_(kernel_state) {}
+ 
 diff --git a/src/xenia/emulator.cc b/src/xenia/emulator.cc
-index eadd15ccf9d3e3836795f966a3bdafd5a1fc218d..048027573c038a3b4218a0c403fedc75ab5ad2d8 100644
+index eadd15ccf..048027573 100644
 --- a/src/xenia/emulator.cc
 +++ b/src/xenia/emulator.cc
 @@ -40,6 +40,7 @@
@@ -250,7 +504,7 @@ index eadd15ccf9d3e3836795f966a3bdafd5a1fc218d..048027573c038a3b4218a0c403fedc75
                               const std::string_view mount_path) {
    auto device = CreateVfsDevice(path, mount_path);
 diff --git a/src/xenia/emulator.h b/src/xenia/emulator.h
-index 9d5e92e4c80b8a8dde88a83a1ee0cd38f86ba998..d21fad29dd5a5029bfe0a449368be424c4f5314a 100644
+index 9d5e92e4c..d21fad29d 100644
 --- a/src/xenia/emulator.h
 +++ b/src/xenia/emulator.h
 @@ -10,9 +10,12 @@
@@ -295,7 +549,7 @@ index 9d5e92e4c80b8a8dde88a83a1ee0cd38f86ba998..d21fad29dd5a5029bfe0a449368be424
    std::string title_name_;
    std::string title_version_;
 diff --git a/src/xenia/hid/keyboard/keyboard_input_driver.cc b/src/xenia/hid/keyboard/keyboard_input_driver.cc
-index 0277b0c1ac92589b34bba3c8ef425fb3edcdad9f..76b7fb7abf8c1cdbcf2887b78ebf671cfd58e16a 100644
+index 0277b0c1a..76b7fb7ab 100644
 --- a/src/xenia/hid/keyboard/keyboard_input_driver.cc
 +++ b/src/xenia/hid/keyboard/keyboard_input_driver.cc
 @@ -420,16 +420,7 @@ X_RESULT KeyboardInputDriver::GetKeystroke(uint32_t user_index, uint32_t flags,
@@ -361,7 +615,7 @@ index 0277b0c1ac92589b34bba3c8ef425fb3edcdad9f..76b7fb7abf8c1cdbcf2887b78ebf671c
  
  void KeyboardInputDriver::OnChar(ui::KeyEvent& e) {
 diff --git a/src/xenia/hid/keyboard/keyboard_input_driver.h b/src/xenia/hid/keyboard/keyboard_input_driver.h
-index 9cd375b7ffeea1e7e320247a75ddadc24137bcf0..549dbc53f429ad5a32af12de257b10d241660f6c 100644
+index 9cd375b7f..549dbc53f 100644
 --- a/src/xenia/hid/keyboard/keyboard_input_driver.h
 +++ b/src/xenia/hid/keyboard/keyboard_input_driver.h
 @@ -61,6 +61,7 @@ class KeyboardInputDriver final : public InputDriver {
@@ -373,7 +627,7 @@ index 9cd375b7ffeea1e7e320247a75ddadc24137bcf0..549dbc53f429ad5a32af12de257b10d2
      bool transition = false;  // going up(false) or going down(true)
      bool prev_state = false;  // down(true) or up(false)
 diff --git a/src/xenia/kernel/smc.cc b/src/xenia/kernel/smc.cc
-index f2c81a9956f93be8c181f1ff99a62c7f818b5c4e..504e0e3355d1ed5dbc1e9d20b9373e5749380adf 100644
+index f2c81a995..504e0e335 100644
 --- a/src/xenia/kernel/smc.cc
 +++ b/src/xenia/kernel/smc.cc
 @@ -52,10 +52,13 @@ SystemManagementController::SystemManagementController()
@@ -394,7 +648,7 @@ index f2c81a9956f93be8c181f1ff99a62c7f818b5c4e..504e0e3355d1ed5dbc1e9d20b9373e57
  
  void SystemManagementController::CallCommand(X_SMC_DATA* smc_message,
 diff --git a/src/xenia/kernel/smc.h b/src/xenia/kernel/smc.h
-index 4820e8ee51dfa5af57b62a8231ee326c0d63b0ac..44f0a0f7b7f1272bf842ad0770e187629a6240d5 100644
+index 4820e8ee5..44f0a0f7b 100644
 --- a/src/xenia/kernel/smc.h
 +++ b/src/xenia/kernel/smc.h
 @@ -221,7 +221,7 @@ class SystemManagementController {
@@ -406,11 +660,33 @@ index 4820e8ee51dfa5af57b62a8231ee326c0d63b0ac..44f0a0f7b7f1272bf842ad0770e18762
  
    void CallCommand(X_SMC_DATA* smc_message, X_SMC_DATA* smc_response);
  
+diff --git a/src/xenia/kernel/testing/CMakeLists.txt b/src/xenia/kernel/testing/CMakeLists.txt
+index 9b95093c2..c6df0c937 100644
+--- a/src/xenia/kernel/testing/CMakeLists.txt
++++ b/src/xenia/kernel/testing/CMakeLists.txt
+@@ -1,3 +1,3 @@
+ xe_test_suite(xenia-kernel-tests ${CMAKE_CURRENT_SOURCE_DIR}
+-  LINKS fmt xenia-base
++  LINKS fmt xenia-base aes_128
+ )
 diff --git a/src/xenia/kernel/xam/xam_avatar.cc b/src/xenia/kernel/xam/xam_avatar.cc
-index ddc96f018d32845edaa39183a97c3a0c598f5ea3..0061b6386912c8190e40ce90e7909c87d756e480 100644
+index ddc96f018..769596438 100644
 --- a/src/xenia/kernel/xam/xam_avatar.cc
 +++ b/src/xenia/kernel/xam/xam_avatar.cc
-@@ -67,6 +67,7 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
+@@ -35,6 +35,12 @@ dword_result_t XamAvatarInitialize_entry(
+     return X_STATUS_SUCCESS;
+   }
+ 
++  if (kernel_state()->title_id() == kDashboardID) {
++    XELOGI("Dashboard avatar initialization: {}",
++           cvars::allow_avatar_initialization
++               ? "enabled; asset pipeline remains incomplete"
++               : "disabled by configuration");
++  }
+   return cvars::allow_avatar_initialization ? X_STATUS_SUCCESS : ~0u;
+ }
+ DECLARE_XAM_EXPORT1(XamAvatarInitialize, kAvatars, kStub);
+@@ -67,6 +73,7 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
          kernel_state()->xam_state()->GetUserProfile(user_index);
  
      if (!user_profile) {
@@ -418,7 +694,7 @@ index ddc96f018d32845edaa39183a97c3a0c598f5ea3..0061b6386912c8190e40ce90e7909c87
        extended_error = X_E_NO_SUCH_USER;
        return X_ERROR_FUNCTION_FAILED;
      }
-@@ -91,10 +92,12 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
+@@ -91,10 +98,12 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
  
      // Profile doesn't have avatar info setting
      if (!avatar_info_setting_data.data.data.binary.ptr) {
@@ -431,7 +707,7 @@ index ddc96f018d32845edaa39183a97c3a0c598f5ea3..0061b6386912c8190e40ce90e7909c87
      return X_ERROR_SUCCESS;
    };
  
-@@ -128,6 +131,7 @@ DECLARE_XAM_EXPORT1(XamAvatarGetManifestsByXuid, kAvatars, kStub)
+@@ -128,6 +137,7 @@ DECLARE_XAM_EXPORT1(XamAvatarGetManifestsByXuid, kAvatars, kStub)
  dword_result_t XamAvatarGetAssetsResultSize_entry(
      dword_t avatar_component_mask, lpdword_t result_buffer_size_ptr,
      lpdword_t gpu_resource_buffer_size_ptr) {
@@ -439,7 +715,7 @@ index ddc96f018d32845edaa39183a97c3a0c598f5ea3..0061b6386912c8190e40ce90e7909c87
    *result_buffer_size_ptr = 0;
    *gpu_resource_buffer_size_ptr = 0;
  
-@@ -140,6 +144,7 @@ dword_result_t XamAvatarGetAssets_entry(
+@@ -140,6 +150,7 @@ dword_result_t XamAvatarGetAssets_entry(
      dword_t avatar_component_mask, dword_t flags, lpdword_t result_buffer_ptr,
      lpdword_t gpu_resource_buffer_ptr,
      pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
@@ -448,7 +724,7 @@ index ddc96f018d32845edaa39183a97c3a0c598f5ea3..0061b6386912c8190e40ce90e7909c87
    if (overlapped_ptr) {
      kernel_state()->CompleteOverlappedImmediateEx(
 diff --git a/src/xenia/kernel/xam/xam_content.cc b/src/xenia/kernel/xam/xam_content.cc
-index 9ed9f97d8286811a2f1aada89d710301db1cb2aa..d1a160823364483d78be5d336ddc6afe92887ecb 100644
+index 9ed9f97d8..d1a160823 100644
 --- a/src/xenia/kernel/xam/xam_content.cc
 +++ b/src/xenia/kernel/xam/xam_content.cc
 @@ -7,6 +7,8 @@
@@ -592,7 +868,7 @@ index 9ed9f97d8286811a2f1aada89d710301db1cb2aa..d1a160823364483d78be5d336ddc6afe
    if (unk3) {
      *unk3 = 0;
 diff --git a/src/xenia/kernel/xam/xam_info.cc b/src/xenia/kernel/xam/xam_info.cc
-index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87df8a56aa3 100644
+index f16753606..3a4363e02 100644
 --- a/src/xenia/kernel/xam/xam_info.cc
 +++ b/src/xenia/kernel/xam/xam_info.cc
 @@ -30,6 +30,7 @@
@@ -613,7 +889,7 @@ index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87d
  
  namespace xe {
  namespace kernel {
-@@ -477,6 +481,117 @@ dword_result_t XamLoaderGetLaunchData_entry(lpvoid_t buffer_ptr,
+@@ -477,6 +481,132 @@ dword_result_t XamLoaderGetLaunchData_entry(lpvoid_t buffer_ptr,
  }
  DECLARE_XAM_EXPORT1(XamLoaderGetLaunchData, kNone, kSketchy);
  
@@ -640,6 +916,7 @@ index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87d
 +                             ? std::string_view()
 +                             : request.substr(separator + 1);
 +  uint32_t package_type = 0;
++  bool game_details = false;
 +  if (scheme == "gameslibrary") {
 +    package_type = 1;
 +  } else if (scheme == "applibrary") {
@@ -647,6 +924,13 @@ index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87d
 +  } else if (scheme == "contentlibrary") {
 +    // The dashboard's Recents tile uses this alias directly, with its own
 +    // SortOrder and _Quickplay arguments, rather than a package-type filter.
++  } else if (scheme == "gamedetails") {
++    // The original XAM registration selects the gamedetails scene, not the
++    // contentlibrary scene used by the library aliases below.
++    if (arguments.empty()) {
++      return X_E_INVALIDARG;
++    }
++    game_details = true;
 +  } else {
 +    XELOGW("Dashboard URI scheme is outside the experimental library routes");
 +    return X_E_NOT_IMPLEMENTED;
@@ -654,10 +938,13 @@ index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87d
 +
 +  // Offline library aliases resolve to the dashboard's own embedded pages.
 +  // Preserve caller parameters; the guest owns rendering and enumeration.
-+  const std::string route =
-+      "pam:BuiltIn.Hub.xzp:root:BuiltIn.ContentApp.xzp:contentlibrary:" +
-+      (package_type ? fmt::format("PackageType={};{}", package_type, arguments)
-+                    : std::string(arguments));
++  const std::string route_arguments = game_details
++      ? fmt::format("MediaId={}", arguments)
++      : package_type ? fmt::format("PackageType={};{}", package_type, arguments)
++                     : std::string(arguments);
++  const std::string route = fmt::format(
++      "pam:BuiltIn.Hub.xzp:root:BuiltIn.ContentApp.xzp:{}:{}",
++      game_details ? "gamedetails" : "contentlibrary", route_arguments);
 +  if (route.size() >= 0x3F0) {
 +    return X_E_INSUFFICIENT_BUFFER;
 +  }
@@ -671,7 +958,11 @@ index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87d
 +  // the user index. The dashboard reads the payload via GetLaunchData.
 +  kernel_state()->BroadcastNotification(0x80040021,
 +                                       (uint32_t(user_index) << 16) | 12);
-+  XELOGI("Dashboard local library route queued (package type {})", package_type);
++  if (game_details) {
++    XELOGI("Dashboard Game Details route queued");
++  } else {
++    XELOGI("Dashboard local library route queued (package type {})", package_type);
++  }
 +  if (overlapped_ptr) {
 +    kernel_state()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_SUCCESS);
 +    return X_E_PENDING;
@@ -732,7 +1023,7 @@ index f16753606973d6fcf4376df51f21e83b57a7b617..d2f94ac820c5176da577cc252017b87d
    auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
  
 diff --git a/src/xenia/kernel/xam/xam_module.cc b/src/xenia/kernel/xam/xam_module.cc
-index 9bc309756aea2f5f94b291b1547eaa4572690483..defe8d96e4866ae3995dc30e696d267303f5b163 100644
+index 9bc309756..defe8d96e 100644
 --- a/src/xenia/kernel/xam/xam_module.cc
 +++ b/src/xenia/kernel/xam/xam_module.cc
 @@ -10,6 +10,7 @@
@@ -790,7 +1081,7 @@ index 9bc309756aea2f5f94b291b1547eaa4572690483..defe8d96e4866ae3995dc30e696d2673
  
  }  // namespace xam
 diff --git a/src/xenia/kernel/xam/xam_module.h b/src/xenia/kernel/xam/xam_module.h
-index ec3bc8e87bd90e37f941c24550c0d026ce7fe5a5..7e30325a13184c567231f8e09ef668da00019069 100644
+index ec3bc8e87..7e30325a1 100644
 --- a/src/xenia/kernel/xam/xam_module.h
 +++ b/src/xenia/kernel/xam/xam_module.h
 @@ -40,7 +40,7 @@ class XamModule : public KernelModule {
@@ -803,7 +1094,7 @@ index ec3bc8e87bd90e37f941c24550c0d026ce7fe5a5..7e30325a13184c567231f8e09ef668da
    void SetLaunchCallback(uint32_t callback) { callback_ = callback; }
  
 diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
-index de577756c9659fd82b367f24218efdf405a24c41..fc93b78358f5cfc801ec287cb2739e928911e1b4 100644
+index de577756c..fc93b7835 100644
 --- a/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
 +++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc
 @@ -11,7 +11,9 @@
@@ -842,7 +1133,7 @@ index de577756c9659fd82b367f24218efdf405a24c41..fc93b78358f5cfc801ec287cb2739e92
    if (X_Key_Properties.contains(key)) {
      auto& key_info = X_Key_Properties.at(key);
 diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
-index 2e6ecf539c0e88bb2a555ab025c8c90a4d0e90cd..3c228e15c7bf11d821c5694393cfcea0e59e0d61 100644
+index 2e6ecf539..3c228e15c 100644
 --- a/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
 +++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc
 @@ -7,6 +7,8 @@
@@ -881,8 +1172,20 @@ index 2e6ecf539c0e88bb2a555ab025c8c90a4d0e90cd..3c228e15c7bf11d821c5694393cfcea0
    if (entry) {
      // Found.
      file_info->creation_time = entry->create_timestamp();
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_module_export_groups.inc b/src/xenia/kernel/xboxkrnl/xboxkrnl_module_export_groups.inc
+index 2506c9004..8c2094a6a 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_module_export_groups.inc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_module_export_groups.inc
+@@ -22,6 +22,7 @@ XE_MODULE_EXPORT_GROUP(xboxkrnl, IoInfo)
+ XE_MODULE_EXPORT_GROUP(xboxkrnl, Memory)
+ XE_MODULE_EXPORT_GROUP(xboxkrnl, Misc)
+ XE_MODULE_EXPORT_GROUP(xboxkrnl, Module)
++XE_MODULE_EXPORT_GROUP(xboxkrnl, DashboardCrypto)
+ XE_MODULE_EXPORT_GROUP(xboxkrnl, Ob)
+ XE_MODULE_EXPORT_GROUP(xboxkrnl, Rtl)
+ XE_MODULE_EXPORT_GROUP(xboxkrnl, String)
 diff --git a/src/xenia/vfs/devices/disc_image_device.h b/src/xenia/vfs/devices/disc_image_device.h
-index 3b098944cacf67858c86765eccc8c05296ee58c5..d78808eb4c36cc98a4bec8e1faa6185cc5851715 100644
+index 3b098944c..d78808eb4 100644
 --- a/src/xenia/vfs/devices/disc_image_device.h
 +++ b/src/xenia/vfs/devices/disc_image_device.h
 @@ -34,6 +34,7 @@ class DiscImageDevice : public Device {
@@ -893,3 +1196,270 @@ index 3b098944cacf67858c86765eccc8c05296ee58c5..d78808eb4c36cc98a4bec8e1faa6185c
    uint32_t attributes() const override { return 0; }
    uint32_t component_name_max_length() const override { return 255; }
  
+diff --git a/src/xenia/cpu/xex_crypto.h b/src/xenia/cpu/xex_crypto.h
+new file mode 100644
+--- /dev/null
++++ b/src/xenia/cpu/xex_crypto.h
+@@ -0,0 +1,13 @@
++/**
++ * Xenia : Xbox 360 Emulator Research Project
++ * Released under the BSD license - see LICENSE in the root for more details.
++ */
++#ifndef XENIA_CPU_XEX_CRYPTO_H_
++#define XENIA_CPU_XEX_CRYPTO_H_
++#include <cstdint>
++namespace xe::cpu {
++// Reuses the loader's existing retail XEX2 key handling. No key material is
++// exposed through this interface or added to callers.
++void UnwrapRetailXex2ImageKey(const uint8_t* wrapped, uint8_t* output);
++}  // namespace xe::cpu
++#endif  // XENIA_CPU_XEX_CRYPTO_H_
+diff --git a/src/xenia/kernel/testing/aes_dashboard_test.cc b/src/xenia/kernel/testing/aes_dashboard_test.cc
+new file mode 100644
+--- /dev/null
++++ b/src/xenia/kernel/testing/aes_dashboard_test.cc
+@@ -0,0 +1,69 @@
++#include <array>
++#include <cstring>
++#include "third_party/catch/include/catch.hpp"
++#include "xenia/kernel/xboxkrnl/xecrypt_aes.h"
++
++using namespace xe::kernel::xboxkrnl;
++
++TEST_CASE("Dashboard AES128 CBC known result and in-place decrypt", "[aes]") {
++  // Synthetic all-zero key, plaintext and IV; no console data or title keys.
++  const std::array<uint8_t, 16> key{};
++  const std::array<uint8_t, 32> plain{};
++  const std::array<uint8_t, 32> expected{
++      0x66, 0xE9, 0x4B, 0xD4, 0xEF, 0x8A, 0x2C, 0x3B,
++      0x88, 0x4C, 0xFA, 0x59, 0xCA, 0x34, 0x2B, 0x2E,
++      0xF7, 0x95, 0xBD, 0x4A, 0x52, 0xE2, 0x9E, 0xD7,
++      0x13, 0xD3, 0x13, 0xFA, 0x20, 0xE9, 0x8D, 0xBC};
++  Aes128Schedule schedule;
++  REQUIRE(CreateAes128Schedule(key.data(), key.size(), &schedule));
++  std::array<uint8_t, 16> iv{};
++  std::array<uint8_t, 32> encrypted;
++  REQUIRE(Aes128Cbc(&schedule, plain.data(), plain.size(), encrypted.data(),
++                     iv.data(), true));
++  REQUIRE(encrypted == expected);
++  REQUIRE(std::memcmp(iv.data(), expected.data() + 16, 16) == 0);
++  iv.fill(0);
++  REQUIRE(Aes128Cbc(&schedule, encrypted.data(), encrypted.size(),
++                     encrypted.data(), iv.data(), false));
++  REQUIRE(encrypted == plain);
++  REQUIRE(std::memcmp(iv.data(), expected.data() + 16, 16) == 0);
++}
++
++TEST_CASE("Dashboard AES128 CBC preserves IV between chunks", "[aes]") {
++  std::array<uint8_t, 16> key{};
++  Aes128Schedule schedule;
++  REQUIRE(CreateAes128Schedule(key.data(), key.size(), &schedule));
++  std::array<uint8_t, 48> whole{};
++  std::array<uint8_t, 48> chunks{};
++  std::array<uint8_t, 16> whole_iv{};
++  std::array<uint8_t, 16> chunk_iv{};
++  REQUIRE(Aes128Cbc(&schedule, whole.data(), whole.size(), whole.data(),
++                     whole_iv.data(), true));
++  REQUIRE(Aes128Cbc(&schedule, chunks.data(), 16, chunks.data(),
++                     chunk_iv.data(), true));
++  REQUIRE(Aes128Cbc(&schedule, chunks.data() + 16, 32, chunks.data() + 16,
++                     chunk_iv.data(), true));
++  REQUIRE(chunks == whole);
++  REQUIRE(chunk_iv == whole_iv);
++}
++
++TEST_CASE("Dashboard AES128 rejects unsupported inputs without writes", "[aes]") {
++  std::array<uint8_t, 32> key{};
++  Aes128Schedule schedule{};
++  REQUIRE_FALSE(CreateAes128Schedule(key.data(), key.size(), &schedule));
++  REQUIRE((schedule.magic == std::array<uint8_t, 4>{}));
++  REQUIRE(CreateAes128Schedule(key.data(), 16, &schedule));
++  std::array<uint8_t, 32> buffer;
++  buffer.fill(0xA5);
++  const auto before = buffer;
++  std::array<uint8_t, 16> iv{};
++  REQUIRE_FALSE(Aes128Cbc(&schedule, buffer.data(), 17, buffer.data(),
++                           iv.data(), false));
++  REQUIRE_FALSE(Aes128Cbc(&schedule, buffer.data(), 16, buffer.data() + 1,
++                           iv.data(), true));
++  REQUIRE(buffer == before);
++  REQUIRE((iv == std::array<uint8_t, 16>{}));
++  Aes128Schedule invalid{};
++  REQUIRE_FALSE(Aes128Cbc(&invalid, buffer.data(), 16, buffer.data(),
++                           iv.data(), false));
++}
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_dashboard_crypto.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_dashboard_crypto.cc
+new file mode 100644
+--- /dev/null
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_dashboard_crypto.cc
+@@ -0,0 +1,86 @@
++/**
++ * Xenia : Xbox 360 Emulator Research Project
++ * Released under the BSD license - see LICENSE in the root for more details.
++ */
++#include "xenia/base/cvar.h"
++#include "xenia/base/logging.h"
++#include "xenia/base/memory.h"
++#include "xenia/cpu/xex_crypto.h"
++#include "xenia/kernel/kernel_state.h"
++#include "xenia/kernel/title_id_utils.h"
++#include "xenia/kernel/util/shim_utils.h"
++#include "xenia/kernel/util/xex2_info.h"
++#include "xenia/kernel/xboxkrnl/xecrypt_aes.h"
++#include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
++
++DEFINE_bool(dashboard_disc_crypto, false,
++            "Experimental retail XEX2 resource decryption for the dashboard.",
++            "Kernel");
++
++namespace xe::kernel::xboxkrnl {
++static bool DashboardDiscCryptoEnabled() {
++  return cvars::dashboard_disc_crypto &&
++         kernel_state()->title_id() == kDashboardID;
++}
++
++dword_result_t XexTransformImageKey_entry(lpvoid_t security, dword_t length) {
++  if (!DashboardDiscCryptoEnabled()) {
++    return X_STATUS_NOT_IMPLEMENTED;
++  }
++  if (!security || length != 0x174) {
++    return X_STATUS_INVALID_PARAMETER;
++  }
++  // Observed XEX2 input is security-info + 8, excluding its two size words.
++  // Mirror the emulator loader's retail key unwrap, not console authorization.
++  auto* data = security.as<uint8_t*>();
++  const auto flags = xe::load_and_swap<uint32_t>(data + 0x104);
++  if (flags & (XEX_IMAGE_CARDEA_KEY | XEX_IMAGE_XEIKA_KEY)) {
++    return X_STATUS_NOT_IMPLEMENTED;
++  }
++  cpu::UnwrapRetailXex2ImageKey(data + 0x148, data + 0x148);
++  XELOGI("Dashboard retail XEX2 image-key transform completed");
++  return X_STATUS_SUCCESS;
++}
++DECLARE_XBOXKRNL_EXPORT1(XexTransformImageKey, kNone, kSketchy);
++
++dword_result_t XeCryptAesCreateKeySchedule_entry(
++    lpvoid_t key, dword_t length, pointer_t<Aes128Schedule> schedule) {
++  if (!DashboardDiscCryptoEnabled()) {
++    return X_STATUS_NOT_IMPLEMENTED;
++  }
++  return CreateAes128Schedule(key.as<const uint8_t*>(), length,
++                              static_cast<Aes128Schedule*>(schedule))
++             ? X_STATUS_SUCCESS
++             : X_STATUS_INVALID_PARAMETER;
++}
++DECLARE_XBOXKRNL_EXPORT1(XeCryptAesCreateKeySchedule, kNone, kSketchy);
++
++static uint32_t DashboardAesCbc(pointer_t<Aes128Schedule> schedule,
++                                lpvoid_t input, dword_t length, lpvoid_t output,
++                                lpvoid_t iv, bool encrypt) {
++  if (!DashboardDiscCryptoEnabled()) {
++    return X_STATUS_NOT_IMPLEMENTED;
++  }
++  return Aes128Cbc(static_cast<Aes128Schedule*>(schedule),
++                   input.as<const uint8_t*>(), length,
++                   output.as<uint8_t*>(), iv.as<uint8_t*>(), encrypt)
++             ? X_STATUS_SUCCESS
++             : X_STATUS_INVALID_PARAMETER;
++}
++
++dword_result_t XeCryptAesCbcEncrypt_entry(pointer_t<Aes128Schedule> schedule,
++                                         lpvoid_t input, dword_t length,
++                                         lpvoid_t output, lpvoid_t iv) {
++  return DashboardAesCbc(schedule, input, length, output, iv, true);
++}
++DECLARE_XBOXKRNL_EXPORT1(XeCryptAesCbcEncrypt, kNone, kSketchy);
++
++dword_result_t XeCryptAesCbcDecrypt_entry(pointer_t<Aes128Schedule> schedule,
++                                         lpvoid_t input, dword_t length,
++                                         lpvoid_t output, lpvoid_t iv) {
++  return DashboardAesCbc(schedule, input, length, output, iv, false);
++}
++DECLARE_XBOXKRNL_EXPORT1(XeCryptAesCbcDecrypt, kNone, kSketchy);
++}  // namespace xe::kernel::xboxkrnl
++
++DECLARE_XBOXKRNL_EMPTY_REGISTER_EXPORTS(DashboardCrypto);
+diff --git a/src/xenia/kernel/xboxkrnl/xecrypt_aes.h b/src/xenia/kernel/xboxkrnl/xecrypt_aes.h
+new file mode 100644
+--- /dev/null
++++ b/src/xenia/kernel/xboxkrnl/xecrypt_aes.h
+@@ -0,0 +1,79 @@
++/**
++ * Xenia : Xbox 360 Emulator Research Project
++ * Released under the BSD license - see LICENSE in the root for more details.
++ */
++#ifndef XENIA_KERNEL_XBOXKRNL_XECRYPT_AES_H_
++#define XENIA_KERNEL_XBOXKRNL_XECRYPT_AES_H_
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++
++extern "C" {
++#include "third_party/aes_128/aes.h"
++}
++
++namespace xe::kernel::xboxkrnl {
++
++// Private HLE representation for the paired modern AES exports. The observed
++// dashboard treats the schedule as opaque and reserves 0x1D8 bytes for it.
++// This is not a claim about the console's expanded-key memory layout.
++struct Aes128Schedule {
++  std::array<uint8_t, 4> magic;
++  std::array<uint8_t, AES_ROUND_KEY_SIZE> encryption;
++};
++static_assert(sizeof(Aes128Schedule) <= 0x1D8);
++inline constexpr std::array<uint8_t, 4> kAes128ScheduleMagic{'X', 'A', 'E', '1'};
++
++inline bool CreateAes128Schedule(const uint8_t* key, size_t length,
++                                 Aes128Schedule* output) {
++  if (!key || !output || length != AES_BLOCK_SIZE) {
++    return false;
++  }
++  Aes128Schedule result{};
++  aes_key_schedule_128(key, result.encryption.data());
++  result.magic = kAes128ScheduleMagic;
++  *output = result;
++  return true;
++}
++
++inline bool Aes128Cbc(const Aes128Schedule* schedule, const uint8_t* input,
++                      size_t length, uint8_t* output, uint8_t* iv,
++                      bool encrypt) {
++  if (!schedule || schedule->magic != kAes128ScheduleMagic || !iv ||
++      length % AES_BLOCK_SIZE || (length && (!input || !output))) {
++    return false;
++  }
++  // Exact in-place operation is supported; shifted overlaps are not.
++  if (input != output && length) {
++    const auto in = reinterpret_cast<uintptr_t>(input);
++    const auto out = reinterpret_cast<uintptr_t>(output);
++    if ((in < out ? out - in : in - out) < length) {
++      return false;
++    }
++  }
++  for (size_t offset = 0; offset < length; offset += AES_BLOCK_SIZE) {
++    std::array<uint8_t, AES_BLOCK_SIZE> block;
++    std::memcpy(block.data(), input + offset, block.size());
++    if (encrypt) {
++      for (size_t j = 0; j < block.size(); ++j) {
++        block[j] ^= iv[j];
++      }
++      aes_encrypt_128(schedule->encryption.data(), block.data(), output + offset);
++      std::memcpy(iv, output + offset, block.size());
++    } else {
++      const std::array<uint8_t, AES_BLOCK_SIZE> original = block;
++      aes_decrypt_128(schedule->encryption.data(), block.data(), output + offset);
++      for (size_t j = 0; j < block.size(); ++j) {
++        output[offset + j] ^= iv[j];
++      }
++      // Decryption requires carrying the original ciphertext block forward as the
++      // next IV. The decrypted block is only used as the plaintext output.
++      std::memcpy(iv, original.data(), original.size());
++    }
++  }
++  return true;
++}
++}  // namespace xe::kernel::xboxkrnl
++#endif  // XENIA_KERNEL_XBOXKRNL_XECRYPT_AES_H_

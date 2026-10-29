@@ -1,56 +1,54 @@
 # CPF Xbox 360 - experimental Xenia Canary integration
 
-**Known limitations first: Game Details does not work, original avatar rendering/customization remains unresolved, and seamless dashboard/game switching is not implemented. Preferences also remains unsupported. This is experimental source, not a complete Xbox 360 operating-system emulator or a release.**
+**Known limitations first: Game Details remains unverified, original avatars/customization and Preferences remain unresolved, and seamless dashboard/game switching is not implemented. This is development source, not a public executable release or a complete console operating-system emulator.**
 
-This Xbox360 branch contains the existing CPF Windows monitor/preservation module, its Rust build files and synthetic tests, browsable Xenia modifications, the reproducible upstream patch, and build/test documentation. It does not contain firmware, dashboard assets, games, profiles, keys, logs, or compiled executables. You must supply your own lawful local research inputs separately.
+This branch contains the existing optional CPF Windows monitor, browsable Xenia modifications, synthetic tests and a reproducible upstream patch. It contains no dashboard binaries/assets, firmware, games, profiles, keys, private logs or compiled executables. Supply your own lawful local research inputs separately.
 
-## Browse the project
+## Project layout
 
-| Directory | Contents |
+| Path | Contents |
 | --- | --- |
-| [monitor](monitor) | Complete existing Rust module: native monitor, firmware tools, library, validator, Cargo files and build script. |
-| [xenia](xenia) | Browsable copies of 17 changed Xenia source/header files and a source-only view of the new media-ID handler. |
-| [patches](patches) | Canonical patch for the pinned upstream revision. |
-| [tools/prepare-xenia.ps1](tools/prepare-xenia.ps1) | Prepare a separate pinned upstream checkout and apply the reviewed patch. |
+| [monitor](monitor) | Existing Rust monitor/preservation module, Cargo files and synthetic tests. |
+| [xenia](xenia) | 23 complete changed/new source views and two explicitly marked helper-only views. |
+| [patches/cpf-dashboard.patch](patches/cpf-dashboard.patch) | Canonical changes to 25 files in the pinned upstream tree. |
+| [tools/prepare-xenia.ps1](tools/prepare-xenia.ps1) | Prepare/check a separate pinned upstream checkout. |
+| [xenia/source-manifest.json](xenia/source-manifest.json) | Source-view hashes, upstream paths and patch identity. |
 
-The optional `Xbox.exe` monitor observes Xenia externally. It does not launch the emulator or render a dashboard. The separate CPF Console Settings launcher integration is not included in this Xbox 360 module. No new standalone application or central launcher is introduced.
+The optional Xbox.exe monitor observes Xenia externally; the authentic dashboard runs in Xenia's own window. The separate CPF Console Settings launcher is not included here. This update adds no standalone application or central launcher.
 
-## What has been observed locally
+## Observed locally
 
-- The authentic Xbox 360 Metro dashboard 2.0.17559.0 boots and renders. This uses original dashboard software supplied locally, not a recreated interface.
-- Keyboard navigation reaches Home, Social, Games, Apps and Settings. Some original system settings pages open. This does not establish every setting works.
-- With `dashboard_local_uri = true`, My Games opens its original empty-library page, My Apps renders six built-in tiles, and Recents opens its original page. Recents showed a Groove Music tile, but did not show the tested game; history enumeration is not established as correct. Individual built-in applications are not verified.
-- One existing local test profile was reused across launches. Profile sign-in/selection is partial; full console-profile compatibility is not claimed.
-- File > Mount game disc... mounts a supported Xbox 360 ISO read-only while the dashboard runs. File > Eject game disc restores the empty-tray state. The Home tile changed between Close Tray and Play Game during controlled tests.
-- A Play Game request can prepare a persistent handoff. Closing and reopening Xenia then booted Halo: Reach to its original welcome/setup screen; manual selection movement was confirmed. Campaign gameplay, save persistence, and a seamless return to the dashboard were not tested.
-- A limited `XeKeysGetMediaID` implementation supplies the mounted disc's 16-byte XGD2 ID to dashboard source-1 queries. The test eliminated repeated undefined-export errors. It does not make Game Details work.
+- Original Metro dashboard 2.0.17559.0 boots and renders. Keyboard navigation reaches the main tabs and some original settings pages; this is original dashboard execution, not a recreation.
+- With `dashboard_local_uri = true`, My Games opens an empty library, My Apps shows six built-in entries, and Recents opens. Correct history enumeration and individual app functionality remain unverified.
+- Existing test-profile selection/sign-in is partial. Tests reused local profile copies; full console-profile compatibility is not established.
+- File > Mount game disc mounts the selected supported ISO read-only. Home changes to Play Game. File > Eject game disc is the tested eject path.
+- Restart-based disc handoff reached Halo: Reach's original welcome/setup screen; manual selection movement was confirmed. Gameplay and same-process title switching are not established.
+- The opt-in disc-crypto experiment completed an image-key transform during a mounted-disc dashboard test. Synthetic AES tests cover known ciphertext, in-place decryption, IV continuity and invalid requests. These observations do not establish the entire resource extraction pipeline.
+- A candidate with controller hotkeys enabled rendered the dashboard, accepted the tested navigation sequence, and closed through the normal exit path without a worker-wait failure. This is a smoke test, not concurrency stress coverage or complete backend teardown.
 
-These are development observations from a limited test setup, not a compatibility guarantee.
+## Changes in this update
 
-## What remains broken or incomplete
+- Added default-off `dashboard_disc_crypto`: narrowly scoped retail image-key transformation and AES schedule/CBC handlers for the observed dashboard resource path. Unsupported key variants and inputs remain rejected. It reuses existing upstream key handling without distributing key constants. It does not implement console authorization or a complete avatar/resource service.
+- Added cooperative controller-hotkey worker stop/join, explicit failure handling, generation-cancelled queued UI actions and normal-shutdown integration. Title selection and its recent-title/dialog access now run on the UI thread. Other backend workers and callback lifetimes still require work before safe title replacement.
+- Added a dashboard-only avatar initialization diagnostic. The tested configuration returned the initialization-disabled path. Defaults and profile data are unchanged; asset and animation handlers remain incomplete.
+- Corrected the experimental Game Details destination from the generic content library to the original embedded `gamedetails` scene. The old mapping reproducibly opened empty My Games. The corrected build booted the dashboard, but native file-picker automation blocked the subsequent disc selection, so the corrected details action was not exercised. Do not describe Game Details as working.
 
-- **Game Details:** an experimental local route did not render reliably and was removed. A later keyboard action in that experiment was followed by a launch-handoff notice; its precise cause remains unresolved. The published patch excludes that route.
-- **Avatars:** original avatar rendering and customization remain unresolved. Existing incomplete avatar APIs have diagnostic probes; they are not proven to be the sole cause.
-- **Title switching:** dashboard-to-disc execution requires a manual backend restart. Safe in-process title replacement is not enabled.
-- **Preferences:** the original system-UI request has no complete implementation. No replacement screen or fake success was added.
-- **Recents/content:** the tested ISO does not appear in Recents or My Games automatically. A mounted ISO is not an installed content package. No synthetic game-library entries are created.
-- **DASHUSER:** the package mounts, but two theme/effect child resources remain absent after retries. Their visible impact has not been established.
-- **Disc metadata:** missing `XexTransformImageKey` and `XeCryptAesCreateKeySchedule` functions were identified in the guest disc-resource extraction path. Their semantics and impact require further investigation.
-- **Media queries:** `XeKeysGetMediaID` supports only the observed dashboard/source-1 case. Other sources and non-dashboard title contexts return an error.
-- **Ejection:** logical eject removes drive aliases, but old disc devices remain alive until shutdown to protect open guest handles. It does not immediately release every ISO mapping/file handle. The dashboard's own controller Y-eject action was not reliably verified.
-- Online Xbox services and general Xbox 360 system-application compatibility are not provided by this patch.
+## Remaining limitations
 
-## Source and attribution
-
-The patch applies to [Xenia Canary](https://github.com/xenia-canary/xenia-canary), upstream revision `2372a54105d9d598ab5bc7ba94a72ef1bea4b271` from `canary_experimental`.
-
-Xenia is credited to its upstream authors and contributors. The patch retains upstream notices and is distributed under the same BSD 3-clause terms; see [LICENSE.xenia](xenia/LICENSE.xenia). This work is an independent CPF experiment, not an upstream Xenia release or endorsement.
-
-The publication contains [cpf-dashboard.patch](patches/cpf-dashboard.patch), affecting 18 C++ source/header files. It includes dashboard routing, virtual-disc handling, restart handoff, keyboard event handling, content-root initialization, and targeted diagnostics. No proprietary firmware binary, private disassembly, key value, or private test fixture is included.
+- **Game Details:** corrected scene mapping needs a controlled mounted-disc rendering/input test. Route dispatch alone is insufficient.
+- **Avatars:** initialization is disabled by default; enabling it does not supply the missing original asset/animation pipeline. Rendering and customization remain unresolved.
+- **Preferences:** the original system-UI request lacks a complete implementation.
+- **Title switching:** the supported experiment uses a backend restart. Main-thread completion, GPU/audio quiescence, guest object retirement and remaining UI callbacks need explicit coordination for same-process switching.
+- **Content:** a mounted ISO is not an installed package and does not automatically appear in My Games or Recents. No synthetic entries are added.
+- **DASHUSER:** the package mounts with a profile, but two theme/effect child requests remain unresolved after retry; visible impact is not established.
+- **Media queries/eject:** media-ID handling is limited to the observed dashboard/source-1 case. Old disc devices remain alive until shutdown to protect guest handles. The dashboard's controller Y-eject path is not verified.
+- Online Xbox services and general system-application compatibility are not provided.
 
 ## Apply and build
 
-Use a separate source checkout. Do not apply the patch to console dumps or replace preserved originals.
+Upstream: [Xenia Canary](https://github.com/xenia-canary/xenia-canary), revision `2372a54105d9d598ab5bc7ba94a72ef1bea4b271` (`canary_experimental`). See [LICENSE.xenia](xenia/LICENSE.xenia) and [THIRD_PARTY.md](THIRD_PARTY.md). This is an independent CPF experiment, not an upstream release or endorsement.
+
+Use a separate source checkout, never console dumps:
 
 ```powershell
 git clone https://github.com/xenia-canary/xenia-canary.git xenia-cpf
@@ -59,34 +57,32 @@ git checkout 2372a54105d9d598ab5bc7ba94a72ef1bea4b271
 git submodule update --init --recursive
 git apply --check <path-to-cpf-dashboard.patch>
 git apply <path-to-cpf-dashboard.patch>
-```
-
-Follow the upstream build prerequisites. Local development used Windows, Visual Studio 2022 and the Vulkan SDK. In a PowerShell session with the required tools available:
-
-```powershell
 $env:_CL_ = '/Z7'
-python xenia-build.py build --config=release
+python xenia-build.py build --config=release --build-tests --target xenia-kernel-tests --target xenia-app
+.\build\bin\Windows\Release\xenia-kernel-tests.exe
 ```
 
-`/Z7` was used to avoid an MSVC C1902 debug-information issue encountered in this setup. It is not a claim that every compiler/SDK combination requires that override. The release-build output is `build/bin/Windows/Release/xenia_canary.exe`; no executable is published here.
+Follow upstream prerequisites. Local builds used Visual Studio 2022 and the Vulkan SDK; `/Z7` avoided an MSVC C1902 issue. Output: `build/bin/Windows/Release/xenia_canary.exe`. Here **Release means compiler configuration**, not a published release. Apply the canonical patch; do not additionally compile the browsable helper-only views.
 
-## Local testing
+## Local testing and privacy
 
-1. Keep original dumps and game images unchanged. Put any user-supplied working copies, configuration, generated profiles and logs outside the publication checkout.
-2. Reuse the existing Xenia storage/configuration and profile when testing persistence. Do not run multiple instances against the same storage.
-3. Launch your locally supplied `dash.xex` with its accompanying extracted flash filesystem. Merely opening the XEX does not prove the dashboard works; verify rendering and input.
-4. The new library routes are disabled by default. After Xenia has generated its configuration, set `dashboard_local_uri = true` in its `[Kernel]` section while Xenia is closed. Test My Games, My Apps, Recents and Back.
-5. Use File > Mount game disc... for a supported ISO. Confirm Play Game appears. Use File > Eject game disc for the tested eject path.
-6. To test the restart handoff, select Play Game, then close and reopen the same Xenia executable with the same storage root. This launches the prepared disc instead of seamlessly replacing the dashboard. Do not repeatedly launch extra instances.
+Keep all supplied console/game data, profiles, configs and logs outside this publication checkout. Use isolated working copies and one emulator instance per storage root. Reuse an existing profile rather than creating duplicates.
 
-The handoff file is `launch_data.bin` under Xenia's storage root and contains local launch information. Keep it private, along with profiles and runtime logs. The patch adds limited redacted diagnostics, but **does not sanitize all upstream logging or crash reporting**. Do not upload raw logs or memory dumps.
+After Xenia generates its config, close it before enabling experiments in `[Kernel]`:
 
-## Validation and publication scope
+```toml
+dashboard_local_uri = true
+dashboard_disc_crypto = true
+```
 
-The published Rust module passed `cargo test --offline --locked`: 13 library tests and 4 monitor tests, with no failures. `cargo build --offline --locked --release --bin Xbox` also passed on Windows. These tests use synthetic fixtures and do not read console dumps. The resulting executable stays in the ignored local target directory and is not uploaded. No GUI or emulator was launched during this source-publication check.
+Both options default to false in source. Do not change `allow_avatar_initialization` merely to hide an initialization failure. Launch your supplied dashboard with its accompanying filesystem, mount the selected supported ISO, wait for Play Game, and use controller X for Game Details. Verify original page rendering and input/Back; this is still a pending compatibility test. For restart handoff, Play Game prepares the next launch: close and reopen the same emulator with the same storage root.
 
-The Xenia preparation helper was checked against the existing pinned development checkout in `-CheckOnly` mode; it recognized all patch hunks without modifying that checkout. The 17 complete source views were compared with the development files after normalizing line endings; the handler-only view contains the exact new media-ID implementation. The source manifest is checked against the Git-staged publication bytes.
+`launch_data.bin` contains local launch information. Keep it private along with profiles, runtime logs and crash reports. Targeted diagnostics do not sanitize all upstream logging; never upload raw logs or memory dumps.
 
-The local source built successfully with Visual Studio 2022, the Vulkan SDK and `/Z7`; `git diff --check` passed. Rendering/input observations above came from controlled local tests. The final metadata-only build was compiled after removing the unsuccessful Game Details route; it was not relaunched after that removal. No stronger final-build runtime claim is made.
+## Validation boundaries
 
-The publication patch passed the apply check against the pinned upstream index; all 18 reconstructed sources match the locally built working sources after normalizing line endings. No CI workflow, binary artifact, tag or GitHub release is part of this source-only upload.
+The October 29 local Xenia builds succeeded with `/Z7`; kernel tests passed 8 cases / 288 assertions. The lifecycle/avatar checkpoint received a dashboard/mount/navigation/normal-close smoke test. The subsequent corrected Game Details build received dashboard boot observation only; its mounted-disc details action remains unverified. No new gameplay, avatar-rendering or seamless-switching claim follows.
+
+The canonical patch is checked against the pinned upstream index and reconstructed source is compared with the development tree after line-ending/BOM normalization. Manifest hashes describe publication bytes. The unchanged Rust monitor previously passed 13 library and 4 monitor tests plus its Windows release build; those earlier results are retained, not claimed as a new run for this update.
+
+No GitHub Actions workflow, binary, tag or public release is added. Private agent notes, disassembly, firmware inputs, keys, profiles and runtime evidence are excluded.

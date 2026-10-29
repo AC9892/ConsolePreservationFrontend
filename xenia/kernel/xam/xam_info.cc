@@ -504,6 +504,7 @@ dword_result_t XamLaunchURI_entry(dword_t user_index, lpvoid_t uri_ptr,
                              ? std::string_view()
                              : request.substr(separator + 1);
   uint32_t package_type = 0;
+  bool game_details = false;
   if (scheme == "gameslibrary") {
     package_type = 1;
   } else if (scheme == "applibrary") {
@@ -511,6 +512,13 @@ dword_result_t XamLaunchURI_entry(dword_t user_index, lpvoid_t uri_ptr,
   } else if (scheme == "contentlibrary") {
     // The dashboard's Recents tile uses this alias directly, with its own
     // SortOrder and _Quickplay arguments, rather than a package-type filter.
+  } else if (scheme == "gamedetails") {
+    // The original XAM registration selects the gamedetails scene, not the
+    // contentlibrary scene used by the library aliases below.
+    if (arguments.empty()) {
+      return X_E_INVALIDARG;
+    }
+    game_details = true;
   } else {
     XELOGW("Dashboard URI scheme is outside the experimental library routes");
     return X_E_NOT_IMPLEMENTED;
@@ -518,10 +526,13 @@ dword_result_t XamLaunchURI_entry(dword_t user_index, lpvoid_t uri_ptr,
 
   // Offline library aliases resolve to the dashboard's own embedded pages.
   // Preserve caller parameters; the guest owns rendering and enumeration.
-  const std::string route =
-      "pam:BuiltIn.Hub.xzp:root:BuiltIn.ContentApp.xzp:contentlibrary:" +
-      (package_type ? fmt::format("PackageType={};{}", package_type, arguments)
-                    : std::string(arguments));
+  const std::string route_arguments = game_details
+      ? fmt::format("MediaId={}", arguments)
+      : package_type ? fmt::format("PackageType={};{}", package_type, arguments)
+                     : std::string(arguments);
+  const std::string route = fmt::format(
+      "pam:BuiltIn.Hub.xzp:root:BuiltIn.ContentApp.xzp:{}:{}",
+      game_details ? "gamedetails" : "contentlibrary", route_arguments);
   if (route.size() >= 0x3F0) {
     return X_E_INSUFFICIENT_BUFFER;
   }
@@ -535,7 +546,11 @@ dword_result_t XamLaunchURI_entry(dword_t user_index, lpvoid_t uri_ptr,
   // the user index. The dashboard reads the payload via GetLaunchData.
   kernel_state()->BroadcastNotification(0x80040021,
                                        (uint32_t(user_index) << 16) | 12);
-  XELOGI("Dashboard local library route queued (package type {})", package_type);
+  if (game_details) {
+    XELOGI("Dashboard Game Details route queued");
+  } else {
+    XELOGI("Dashboard local library route queued (package type {})", package_type);
+  }
   if (overlapped_ptr) {
     kernel_state()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_SUCCESS);
     return X_E_PENDING;

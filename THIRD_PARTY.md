@@ -6,7 +6,7 @@ Upstream: https://github.com/xenia-canary/xenia-canary
 Pinned revision: `2372a54105d9d598ab5bc7ba94a72ef1bea4b271`
 License: BSD 3-clause, reproduced in `xenia/LICENSE.xenia`.
 
-The `xenia` files are modified upstream source with notices retained, except the explicitly marked new-handler-only view. The canonical patch records the actual modifications. This repository is not an upstream Xenia release. Upstream dependencies are fetched separately with their existing licenses and notices; they are not vendored here.
+The `xenia` files are modified upstream source with notices retained, except the two explicitly marked helper-only views. The canonical patch records the actual modifications. New dashboard crypto, synthetic AES tests and lifecycle changes retain the Xenia BSD terms; helper views omit existing upstream key constants. This repository is not an upstream Xenia release. Upstream dependencies are fetched separately with their existing licenses and notices; they are not vendored here.
 
 ## CPF Xbox 360 Rust module
 

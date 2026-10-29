@@ -574,6 +574,9 @@ bool EmulatorApp::OnInitialize() {
 }
 
 void EmulatorApp::OnDestroy() {
+  if (emulator_window_) {
+    emulator_window_->StopControllerHotkeys();
+  }
   ShutdownEmulatorThreadFromUIThread();
 
   if (cvars::discord) {

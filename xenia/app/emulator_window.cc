@@ -211,6 +211,7 @@ std::unique_ptr<EmulatorWindow> EmulatorWindow::Create(
 }
 
 EmulatorWindow::~EmulatorWindow() {
+  StopControllerHotkeys();
   // Notify the ImGui drawer that the immediate drawer is being destroyed.
   ShutdownGraphicsSystemPresenterPainting();
 }
@@ -280,7 +281,10 @@ void EmulatorWindow::OnEmulatorInitialized() {
   }
 
   // Create a thread to listen for controller hotkeys.
-  if (cvars::controller_hotkeys) {
+  if (cvars::controller_hotkeys && !Gamepad_HotKeys_Listener) {
+    controller_hotkeys_stop_requested_.store(false);
+    controller_hotkeys_callbacks_alive_ =
+        std::make_shared<std::atomic<bool>>(true);
     Gamepad_HotKeys_Listener =
         threading::Thread::Create({}, [&] { GamepadHotKeys(); });
     Gamepad_HotKeys_Listener->set_name("Gamepad HotKeys Listener");
@@ -2004,22 +2008,22 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
 
   switch (button_combination.function) {
     case ButtonFunctions::ToggleFullscreen:
-      app_context().CallInUIThread([this]() { ToggleFullscreen(); });
+      QueueControllerHotkeyAction([this]() { ToggleFullscreen(); });
 
       // Extra Sleep
       xe::threading::Sleep(delay);
       break;
     case ButtonFunctions::RunTitle: {
-      if (selected_title_index == -1) {
-        selected_title_index++;
-      }
-
-      if (selected_title_index < recently_launched_titles_.size()) {
-        app_context().CallInUIThread([this]() {
+      QueueControllerHotkeyAction([this]() {
+        if (selected_title_index == -1) {
+          selected_title_index = 0;
+        }
+        if (selected_title_index >= 0 &&
+            size_t(selected_title_index) < recently_launched_titles_.size()) {
           RunTitle(
               recently_launched_titles_[selected_title_index].path_to_file);
-        });
-      }
+        }
+      });
     } break;
     case ButtonFunctions::ClearMemoryPageState:
       ToggleGPUSetting(GPUSetting::ClearMemoryPageState);
@@ -2091,10 +2095,10 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
       xe::threading::Sleep(delay);
     } break;
     case ButtonFunctions::IncTitleSelect:
-      selected_title_index++;
+      QueueControllerHotkeyAction([this]() { SelectRecentTitleFromHotkey(1); });
       break;
     case ButtonFunctions::DecTitleSelect:
-      selected_title_index--;
+      QueueControllerHotkeyAction([this]() { SelectRecentTitleFromHotkey(-1); });
       break;
     case ButtonFunctions::ToggleLogging: {
       logging::ToggleLogLevel();
@@ -2109,39 +2113,8 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
       break;
   }
 
-  if ((button_combination.function == ButtonFunctions::IncTitleSelect ||
-       button_combination.function == ButtonFunctions::DecTitleSelect) &&
-      recently_launched_titles_.size() > 0) {
-    selected_title_index =
-        std::clamp(selected_title_index, 0,
-                   static_cast<int32_t>(recently_launched_titles_.size() - 1));
-
-    // Must clear dialogs to prevent stacking
-    ClearDialogs();
-
-    // Titles may contain Unicode characters such as At World’s End
-    // Must use ImGUI font that can render these Unicode characters
-    std::string title_name;
-
-    // Use filename if title name is empty
-    if (recently_launched_titles_[selected_title_index].title_name.empty()) {
-      title_name = recently_launched_titles_[selected_title_index]
-                       .path_to_file.filename()
-                       .string();
-    } else {
-      title_name = recently_launched_titles_[selected_title_index].title_name;
-    }
-
-    std::string title = fmt::format(
-        "{}: {}\n\n{}", selected_title_index + 1, title_name,
-        controller_hotkey_map.find(X_INPUT_GAMEPAD_START)->second.pretty);
-
-    xe::ui::ImGuiDialog::ShowMessageBox(imgui_drawer_.get(), "Title Selection",
-                                        title);
-  }
-
   if (!notificationTitle.empty()) {
-    app_context_.CallInUIThread(
+    QueueControllerHotkeyAction(
         [imgui_drawer = imgui_drawer(), notificationTitle, notificationDesc]() {
           new xe::ui::HostNotificationWindow(imgui_drawer, notificationTitle,
                                              notificationDesc, 0);
@@ -2175,6 +2148,51 @@ void EmulatorWindow::VibrateController(xe::hid::InputSystem* input_sys,
   }
 }
 
+void EmulatorWindow::SelectRecentTitleFromHotkey(int delta) {
+  assert_true(app_context_.IsInUIThread());
+  if (recently_launched_titles_.empty()) {
+    return;
+  }
+  selected_title_index = std::clamp(
+      selected_title_index + delta, 0,
+      static_cast<int32_t>(recently_launched_titles_.size() - 1));
+  ClearDialogs();
+  const auto& entry = recently_launched_titles_[selected_title_index];
+  const std::string title_name = entry.title_name.empty()
+                                     ? entry.path_to_file.filename().string()
+                                     : entry.title_name;
+  const auto start = controller_hotkey_map.find(X_INPUT_GAMEPAD_START);
+  const std::string title = fmt::format(
+      "{}: {}\n\n{}", selected_title_index + 1, title_name,
+      start != controller_hotkey_map.end() ? start->second.pretty : "");
+  xe::ui::ImGuiDialog::ShowMessageBox(imgui_drawer_.get(), "Title Selection",
+                                    title);
+}
+
+void EmulatorWindow::QueueControllerHotkeyAction(std::function<void()> action) {
+  auto alive = controller_hotkeys_callbacks_alive_;
+  app_context_.CallInUIThread([alive, action = std::move(action)]() {
+    if (alive->load()) {
+      action();
+    }
+  });
+}
+
+void EmulatorWindow::StopControllerHotkeys() {
+  assert_true(app_context_.IsInUIThread());
+  controller_hotkeys_callbacks_alive_->store(false);
+  controller_hotkeys_stop_requested_.store(true);
+  if (Gamepad_HotKeys_Listener) {
+    if (xe::threading::Wait(Gamepad_HotKeys_Listener.get(), false) !=
+        xe::threading::WaitResult::kSuccess) {
+      // A failed wait is not evidence that the cached input-system pointer is
+      // no longer in use. Fail closed before destroying any of its owners.
+      xe::FatalError("Controller hotkey worker shutdown could not be confirmed.");
+    }
+    Gamepad_HotKeys_Listener.reset();
+  }
+}
+
 void EmulatorWindow::GamepadHotKeys() {
   X_INPUT_STATE state;
 
@@ -2183,7 +2201,7 @@ void EmulatorWindow::GamepadHotKeys() {
   auto input_sys = emulator_->input_system();
 
   if (input_sys) {
-    while (true) {
+    while (!controller_hotkeys_stop_requested_.load()) {
       // Collect controller states while holding the lock
       std::array<std::pair<bool, X_INPUT_STATE>, XUserMaxUserCount>
           controller_states;
@@ -2200,6 +2218,9 @@ void EmulatorWindow::GamepadHotKeys() {
       // Process hotkeys without holding the lock
       for (uint32_t user_index = 0; user_index < XUserMaxUserCount;
            ++user_index) {
+        if (controller_hotkeys_stop_requested_.load()) {
+          break;
+        }
         if (controller_states[user_index].first) {
           if (ProcessControllerHotkey(
                   controller_states[user_index].second.gamepad.buttons)

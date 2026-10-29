@@ -2,31 +2,43 @@
   "upstream": "https://github.com/xenia-canary/xenia-canary",
   "revision": "2372a54105d9d598ab5bc7ba94a72ef1bea4b271",
   "canonical_patch": "../patches/cpf-dashboard.patch",
-  "patch_sha256": "fa520cf210b707bf47b63b060b1e0e6b89324d21f56262720c9fcdf8a8207697",
+  "patch_sha256": "11cc6740c35a44faab060ef540b3e815aa4b3bd2f50ea323f4780fdf7b4cec62",
   "files": [
     {
       "upstream_path": "src/xenia/app/emulator_window.cc",
       "source_view": "app/emulator_window.cc",
       "view_kind": "complete modified file",
-      "sha256": "47bb0b616f0c0a4493b5206725e54d957dd69faeb4bca584a221b782256f8b32"
+      "sha256": "12306785f82c998b6a32db6e789fa6ed877aa984d5823b0f39a4252b7ecc7ea5"
     },
     {
       "upstream_path": "src/xenia/app/emulator_window.h",
       "source_view": "app/emulator_window.h",
       "view_kind": "complete modified file",
-      "sha256": "ec2cc094ed5c0acebf3704a7f00710359da068eea73ace2100882e1be17d57d7"
+      "sha256": "75eb3f18d5583245141e40647054c439f49bedeed084cb4c1c2e0817dcf2ad7e"
     },
     {
       "upstream_path": "src/xenia/app/xenia_main.cc",
       "source_view": "app/xenia_main.cc",
       "view_kind": "complete modified file",
-      "sha256": "427660a7ec9cecd6ee1d91695611119bf8da9da5f3049047625978d86ada41a2"
+      "sha256": "a2ebae97012ed8c468922599d43dc843118a2c1fc7e8ce11e087bc4b971f94e5"
     },
     {
       "upstream_path": "src/xenia/cpu/backend/x64/x64_emitter.cc",
       "source_view": "cpu/backend/x64/x64_emitter.cc",
       "view_kind": "complete modified file",
       "sha256": "da146c84c1ea30c1b1f10043e26fc0fe6ca1dbe4a38d24644f354d9e0a34b0e1"
+    },
+    {
+      "upstream_path": "src/xenia/cpu/xex_crypto.h",
+      "source_view": "cpu/xex_crypto.h",
+      "view_kind": "complete new file",
+      "sha256": "b1a34253651ea212d30c52dc61df0eecc03f41ea96c020285e27a4041c8099d6"
+    },
+    {
+      "upstream_path": "src/xenia/cpu/xex_module.cc",
+      "source_view": "extensions/xex_image_key_unwrap.cc",
+      "view_kind": "CPF helper only",
+      "sha256": "29361c48bab5ca13be8871842c79879739f69c769801a4dd7a4914dc6eacd89b"
     },
     {
       "upstream_path": "src/xenia/emulator.cc",
@@ -65,10 +77,22 @@
       "sha256": "a45b0f9986dcd1aff8e452be254642c2033b2ed53f4dc69dd3f7baf018512b44"
     },
     {
+      "upstream_path": "src/xenia/kernel/testing/CMakeLists.txt",
+      "source_view": "kernel/testing/CMakeLists.txt",
+      "view_kind": "complete modified file",
+      "sha256": "b584f447435900d77ad0f2189290af29b73325ce3c0c3467ab91a516377a360b"
+    },
+    {
+      "upstream_path": "src/xenia/kernel/testing/aes_dashboard_test.cc",
+      "source_view": "kernel/testing/aes_dashboard_test.cc",
+      "view_kind": "complete new file",
+      "sha256": "d2cc632526ee60e6a8190d30017c8d442eac29ef3de527adc98bbcf5901bcb27"
+    },
+    {
       "upstream_path": "src/xenia/kernel/xam/xam_avatar.cc",
       "source_view": "kernel/xam/xam_avatar.cc",
       "view_kind": "complete modified file",
-      "sha256": "f9b40f061423e31dc459b56d1b326a3b7745c593654b16d7f6276fc03a34110a"
+      "sha256": "7fb79cb9e98dc6f37dde0a7cf43de2a284236a4af30bf5f3b3fe7c751b0b6e81"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_content.cc",
@@ -80,7 +104,7 @@
       "upstream_path": "src/xenia/kernel/xam/xam_info.cc",
       "source_view": "kernel/xam/xam_info.cc",
       "view_kind": "complete modified file",
-      "sha256": "424ec4f0cdf1b566eb0653c0ea4614a29861c2fd8b14c48f8a4f4961cd31db5d"
+      "sha256": "55304a047d50a544c63aec3eb9a11b33790ca976ed0b013eb6fe3c81a70c7e70"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_module.cc",
@@ -101,10 +125,28 @@
       "sha256": "a5f9521e5850beabb2f971f09f43086d8bf965006cc30e73e2e9a149f237a0e5"
     },
     {
+      "upstream_path": "src/xenia/kernel/xboxkrnl/xboxkrnl_dashboard_crypto.cc",
+      "source_view": "kernel/xboxkrnl/xboxkrnl_dashboard_crypto.cc",
+      "view_kind": "complete new file",
+      "sha256": "9e9f67d35ba1edd037455f43a85cfaeaf5e400d8579e37edcaec7f8ea62ab5e5"
+    },
+    {
       "upstream_path": "src/xenia/kernel/xboxkrnl/xboxkrnl_io.cc",
       "source_view": "kernel/xboxkrnl/xboxkrnl_io.cc",
       "view_kind": "complete modified file",
       "sha256": "a39efbace155e46085f361f52e206d86d925ecc0882b397b0f6932298760b74c"
+    },
+    {
+      "upstream_path": "src/xenia/kernel/xboxkrnl/xboxkrnl_module_export_groups.inc",
+      "source_view": "kernel/xboxkrnl/xboxkrnl_module_export_groups.inc",
+      "view_kind": "complete modified file",
+      "sha256": "4af642994899ddee74bde33bd650ddd6810b079f9cdd07e384e6db4ddec025cb"
+    },
+    {
+      "upstream_path": "src/xenia/kernel/xboxkrnl/xecrypt_aes.h",
+      "source_view": "kernel/xboxkrnl/xecrypt_aes.h",
+      "view_kind": "complete new file",
+      "sha256": "8c7f6249d6e0cb06d6f2f43dc8bea1f88d05c1ed12a261ebeb03f27d4c2abe94"
     },
     {
       "upstream_path": "src/xenia/vfs/devices/disc_image_device.h",

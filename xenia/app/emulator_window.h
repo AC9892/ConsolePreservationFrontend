@@ -10,6 +10,8 @@
 #ifndef XENIA_APP_EMULATOR_WINDOW_H_
 #define XENIA_APP_EMULATOR_WINDOW_H_
 
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -60,6 +62,10 @@ class EmulatorWindow {
       uint32_t height);
 
   std::unique_ptr<xe::threading::Thread> Gamepad_HotKeys_Listener;
+
+  // Call on the UI thread while the input backend is still alive. This joins
+  // the polling worker and cancels its queued UI callbacks.
+  void StopControllerHotkeys();
 
   int32_t selected_title_index = -1;
 
@@ -244,6 +250,8 @@ class EmulatorWindow {
                           uint32_t height);
 
   bool Initialize();
+  void QueueControllerHotkeyAction(std::function<void()> action);
+  void SelectRecentTitleFromHotkey(int delta);
 
   // For comparisons, use GetSwapPostEffectForCvarValue instead as the default
   // fallback may be used for multiple values.
@@ -318,6 +326,11 @@ class EmulatorWindow {
 
   bool emulator_initialized_ = false;
   std::atomic<bool> disable_hotkeys_ = false;
+  std::atomic<bool> controller_hotkeys_stop_requested_{false};
+  // Each listener generation owns a token. Queued UI work may outlive the
+  // listener/window but must not touch either after this token is invalidated.
+  std::shared_ptr<std::atomic<bool>> controller_hotkeys_callbacks_alive_ =
+      std::make_shared<std::atomic<bool>>(false);
 
   std::string base_title_;
   bool initializing_shader_storage_ = false;

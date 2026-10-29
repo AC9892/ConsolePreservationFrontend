@@ -35,6 +35,12 @@ dword_result_t XamAvatarInitialize_entry(
     return X_STATUS_SUCCESS;
   }
 
+  if (kernel_state()->title_id() == kDashboardID) {
+    XELOGI("Dashboard avatar initialization: {}",
+           cvars::allow_avatar_initialization
+               ? "enabled; asset pipeline remains incomplete"
+               : "disabled by configuration");
+  }
   return cvars::allow_avatar_initialization ? X_STATUS_SUCCESS : ~0u;
 }
 DECLARE_XAM_EXPORT1(XamAvatarInitialize, kAvatars, kStub);
