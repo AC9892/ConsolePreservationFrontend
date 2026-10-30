@@ -4,6 +4,14 @@
 
 This branch contains the existing optional CPF Windows monitor, browsable Xenia modifications, synthetic tests and a reproducible upstream patch. It contains no dashboard binaries/assets, firmware, games, profiles, keys, private logs or compiled executables. Supply your own lawful local research inputs separately.
 
+## Gamer-picture checkpoint (2026-10-30)
+
+The additive [gamer-tile patch](patches/cpf-gamer-tile.patch) corrects RGBA-to-ARGB row placement for padded texture pitch, rejects undersized destinations and handles image decoder failure. Apply it after `cpf-dashboard.patch` to the pinned upstream checkout. This is a source checkpoint, not a release.
+
+Validation: incremental development build passed with `/Z7`; syntax check passed; two synthetic tests passed with eight assertions. The modified executable has not been visually tested. This does not establish that missing gamer pictures are fixed.
+
+Historical dashboard tests confirmed original builds 1888, 7371 and 12581 render and accept keyboard gamepad navigation. These bounded tests do not establish full system functionality. The isolated test profile had no stored picture or avatar manifest. A controlled 12581 avatar-initialization test reached the existing zero-size/incomplete asset handlers and still displayed a gray figure. Original personalized 3D avatars remain unresolved; supplying original assets requires a real asset/animation pipeline. No dashboard resources or profile data accompany these sources.
+
 ## Project layout
 
 | Path | Contents |
