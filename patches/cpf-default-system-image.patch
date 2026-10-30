@@ -1,0 +1,141 @@
+diff --git a/src/xenia/kernel/xam/xam_module.h b/src/xenia/kernel/xam/xam_module.h
+--- a/src/xenia/kernel/xam/xam_module.h
++++ b/src/xenia/kernel/xam/xam_module.h
+@@ -11,6 +11,7 @@
+ #define XENIA_KERNEL_XAM_XAM_MODULE_H_
+ 
+ #include <string>
++#include <mutex>
+ 
+ #include "xenia/cpu/export_resolver.h"
+ #include "xenia/kernel/kernel_module.h"
+@@ -41,6 +42,7 @@
+ 
+   void LoadLoaderData();
+   bool SaveLoaderData();
++  bool GetDefaultSystemImage(uint32_t* address, uint32_t* size);
+ 
+   void SetLaunchCallback(uint32_t callback) { callback_ = callback; }
+ 
+@@ -50,6 +52,9 @@
+  private:
+   uint32_t callback_ = 0;
+   LoaderData loader_data_;
++  std::mutex default_image_mutex_;
++  uint32_t default_image_address_ = 0;
++  uint32_t default_image_size_ = 0;
+ };
+ 
+ }  // namespace xam
+diff --git a/src/xenia/kernel/xam/xam_module.cc b/src/xenia/kernel/xam/xam_module.cc
+--- a/src/xenia/kernel/xam/xam_module.cc
++++ b/src/xenia/kernel/xam/xam_module.cc
+@@ -10,9 +10,15 @@
+ #include "xenia/kernel/xam/xam_module.h"
+ 
+ #include "xenia/base/math.h"
++#include "xenia/base/cvar.h"
++#include "third_party/stb/stb_image.h"
+ #include "xenia/emulator.h"
+ #include "xenia/kernel/kernel_state.h"
+ #include "xenia/kernel/xam/xam_private.h"
++
++DEFINE_path(dashboard_default_system_image, "",
++            "Optional local original dashboard defaultsystemimage.png. "
++            "Restart the emulator after changing this path.", "Kernel");
+ 
+ namespace xe {
+ namespace kernel {
+@@ -61,7 +67,61 @@
+   export_resolver->RegisterTable("xam.xex", &get_xam_exports());
+ }
+ 
+-XamModule::~XamModule() {}
++XamModule::~XamModule() {
++  if (default_image_address_) {
++    memory_->SystemHeapFree(default_image_address_);
++  }
++}
++
++bool XamModule::GetDefaultSystemImage(uint32_t* address, uint32_t* size) {
++  std::lock_guard<std::mutex> lock(default_image_mutex_);
++  if (!default_image_address_) {
++    if (cvars::dashboard_default_system_image.empty()) {
++      return false;
++    }
++    FILE* file = xe::filesystem::OpenFile(
++        cvars::dashboard_default_system_image, "rb");
++    if (!file) {
++      return false;
++    }
++    // Bound allocation and decoder input before reading user-supplied bytes.
++    constexpr size_t kMaximumImageSize = 1024 * 1024;
++    std::vector<uint8_t> bytes(kMaximumImageSize + 1);
++    const size_t length = fread(bytes.data(), 1, bytes.size(), file);
++    const bool read_failed = ferror(file) != 0;
++    fclose(file);
++    if (read_failed || length < 24 || length > kMaximumImageSize) {
++      return false;
++    }
++    const uint8_t signature[] = {137, 80, 78, 71, 13, 10, 26, 10};
++    if (memcmp(bytes.data(), signature, sizeof(signature)) != 0) {
++      return false;
++    }
++    int width = 0, height = 0, channels = 0;
++    if (!stbi_info_from_memory(bytes.data(), static_cast<int>(length), &width,
++                               &height, &channels) ||
++        width != 64 || height != 64) {
++      return false;
++    }
++    auto* decoded = stbi_load_from_memory(bytes.data(), static_cast<int>(length),
++                                         &width, &height, &channels, 4);
++    if (!decoded) {
++      return false;
++    }
++    stbi_image_free(decoded);
++    const uint32_t allocation =
++        memory_->SystemHeapAlloc(static_cast<uint32_t>(length));
++    if (!allocation) {
++      return false;
++    }
++    memcpy(memory_->TranslateVirtual<uint8_t*>(allocation), bytes.data(), length);
++    default_image_address_ = allocation;
++    default_image_size_ = static_cast<uint32_t>(length);
++  }
++  *address = default_image_address_;
++  *size = default_image_size_;
++  return true;
++}
+ 
+ void XamModule::LoadLoaderData() {
+   const auto path = emulator_->storage_root() / kXamModuleLoaderDataFileName;
+diff --git a/src/xenia/kernel/xam/xam_info.cc b/src/xenia/kernel/xam/xam_info.cc
+--- a/src/xenia/kernel/xam/xam_info.cc
++++ b/src/xenia/kernel/xam/xam_info.cc
+@@ -62,5 +62,26 @@
+ namespace kernel {
+ namespace xam {
+ 
++// The original dashboard receives a borrowed, XAM-owned PNG pointer. It must
++// not free it. The optional source path is empty unless explicitly configured.
++dword_result_t XamGetDefaultSystemImage_entry(lpdword_t image_ptr,
++                                               lpdword_t size_ptr) {
++  if (!image_ptr) {
++    return X_E_INVALIDARG;
++  }
++  uint32_t address = 0, size = 0;
++  auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
++  if (kernel_state()->title_id() != kDashboardID ||
++      (!xam || !xam->GetDefaultSystemImage(&address, &size))) {
++    return 0x8000FFFF;  // Original uninitialized image-cache result.
++  }
++  *image_ptr = address;
++  if (size_ptr) {
++    *size_ptr = size;
++  }
++  return X_ERROR_SUCCESS;
++}
++DECLARE_XAM_EXPORT1(XamGetDefaultSystemImage, kUserProfiles, kSketchy);
++
+ // https://github.com/tpn/winsdk-10/blob/master/Include/10.0.14393.0/km/wdm.h#L15539
+ typedef enum _MODE { KernelMode, UserMode, MaximumMode } MODE;

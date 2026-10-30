@@ -14,6 +14,12 @@ Historical dashboard tests confirmed original builds 1888, 7371 and 12581 render
 
 Read-only avatar-pack research now identifies unique bounded candidate index layouts for the tested NXE and Kinect inputs, including the legacy pack. All populated candidate ranges were checked for bounds and overlap. The legacy file demonstrates that the header version alone cannot choose the index layout. Guest asset identifiers and output/GPU buffer contracts remain unresolved; no avatar loader has been integrated and no personalized 3D rendering is claimed.
 
+## Metro default-image API experiment
+
+Apply [cpf-default-system-image.patch](patches/cpf-default-system-image.patch) after the canonical dashboard patch. It adds an opt-in `dashboard_default_system_image` path in `[Kernel]` for your separately supplied original 64x64 PNG. No image is distributed. The loader caps input at 1 MiB, checks PNG decoding/dimensions and keeps a mutex-protected guest cache owned by XAM until module teardown. Restart after changing the path.
+
+The candidate built with `/Z7` and booted original Metro17559 in isolated storage. Home/Social rendering and shoulder navigation were observed; the default-image export is registered and its undefined-call warning was absent. A visible picture improvement and successful cache return were not established. Gray avatars remain. Missing/invalid input, concurrent calls and cache teardown need focused verification. This API experiment is not a completed picture or 3D-avatar fix.
+
 ## Project layout
 
 | Path | Contents |
