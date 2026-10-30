@@ -1,5 +1,7 @@
 # CPF Xbox 360 - experimental Xenia Canary integration
 
+https://github.com/user-attachments/assets/5b367fa9-cada-45bc-a720-1e2fb7f3cf26
+
 **Known limitations first: Game Details remains unverified, original avatars/customization and Preferences remain unresolved, and seamless dashboard/game switching is not implemented. This is development source, not a public executable release or a complete console operating-system emulator.**
 
 This branch contains the existing optional CPF Windows monitor, browsable Xenia modifications, synthetic tests and a reproducible upstream patch. It contains no dashboard binaries/assets, firmware, games, profiles, keys, private logs or compiled executables. Supply your own lawful local research inputs separately.
