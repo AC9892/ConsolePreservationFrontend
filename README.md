@@ -12,6 +12,8 @@ Validation: incremental development build passed with `/Z7`; syntax check passed
 
 Historical dashboard tests confirmed original builds 1888, 7371 and 12581 render and accept keyboard gamepad navigation. These bounded tests do not establish full system functionality. The isolated test profile had no stored picture or avatar manifest. A controlled 12581 avatar-initialization test reached the existing zero-size/incomplete asset handlers and still displayed a gray figure. Original personalized 3D avatars remain unresolved; supplying original assets requires a real asset/animation pipeline. No dashboard resources or profile data accompany these sources.
 
+Read-only avatar-pack research now identifies unique bounded candidate index layouts for the tested NXE and Kinect inputs, including the legacy pack. All populated candidate ranges were checked for bounds and overlap. The legacy file demonstrates that the header version alone cannot choose the index layout. Guest asset identifiers and output/GPU buffer contracts remain unresolved; no avatar loader has been integrated and no personalized 3D rendering is claimed.
+
 ## Project layout
 
 | Path | Contents |
