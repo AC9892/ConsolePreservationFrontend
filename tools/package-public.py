@@ -68,7 +68,8 @@ def main():
         '[Kernel]\ndashboard_local_uri = true\ndashboard_disc_crypto = true\n'
         'allow_avatar_initialization = false\n'
         'dashboard_default_system_image = ""\n'
-        '[General]\ncontroller_hotkeys = false\n', encoding='utf-8')
+        '[General]\ncontroller_hotkeys = false\n'
+        '[HID]\nhid = "any"\nkeyboard_mode = 1\nkeyboard_user_index = 0\n', encoding='utf-8')
     records = [{'file': f.relative_to(output).as_posix(), 'bytes': f.stat().st_size,
                 'sha256': hashlib.sha256(f.read_bytes()).hexdigest()}
                for f in sorted(output.rglob("*")) if f.is_file()]

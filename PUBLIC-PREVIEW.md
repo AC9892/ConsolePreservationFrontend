@@ -4,9 +4,11 @@ This backend runs the original Xbox 360 dashboard in Xenia's own window. It does
 
 ## What to expect
 
-Dashboard boot and some navigation have been observed locally. Personalized avatars, Game Details, Preferences, online services and seamless dashboard/game switching remain incomplete. Public preview runtime validation is still pending; source build success does not prove a public package works.
+Dashboard boot and some navigation have been observed locally. Personalized avatars, Game Details, Preferences, online services and seamless dashboard/game switching remain incomplete. On 2026-11-04, a clean public-source build booted Metro 17559 with a newly created disposable profile. Home/Social rendering, shoulder navigation, normal exit and one profile-persistence restart were observed. This is limited local validation, not complete console compatibility.
 
-## Using a validated preview folder
+Requires Windows x64, the Microsoft Visual C++ x64 runtime and a compatible graphics driver. The Vulkan SDK is a build prerequisite, not a dashboard file.
+
+## Using the preview folder
 
 1. Extract the complete preview folder somewhere writable.
 2. Keep your own extracted dashboard filesystem in a separate folder, preserving its accompanying files. A NAND image or a lone dash.xex is not a complete prepared filesystem.

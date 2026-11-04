@@ -10,7 +10,7 @@ This branch contains the existing optional CPF Windows monitor, browsable Xenia 
 
 See [PUBLIC-PREVIEW.md](PUBLIC-PREVIEW.md) for the build and user-file setup path. The preparation script now validates and applies all three published patches, recognizes fully prepared source, and refuses conflicting source without resetting it. The new packaging tool stages an explicit executable/documentation/configuration allowlist and a hash manifest. It never copies a development runtime folder.
 
-A clean public-source build is being validated. A downloadable public binary is not yet certified or released; local dashboard success does not substitute for that check.
+A clean public-source build passed 10 kernel test cases / 296 assertions and a fresh-profile Metro17559 boot/navigation test on 2026-11-04. The public template now enables keyboard controller emulation. A clean unpacked preview and ZIP are staged locally; no GitHub binary release has been created. See PUBLIC-PREVIEW.md for the exact validation limits.
 
 ## Gamer-picture checkpoint (2026-10-30)
 
