@@ -16,6 +16,8 @@ pub mod public_setup;
 pub mod runtime_diagnostics;
 pub mod runtime_setup;
 pub mod sd_media;
+#[cfg(all(windows, feature = "public-release"))]
+pub mod setup_window;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Model {

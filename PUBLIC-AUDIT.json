@@ -1,16 +1,16 @@
 {
-  "source_files": 2170,
+  "source_files": 2171,
   "package_files": 121,
   "development_bundle_used": false,
   "backend_bundled": false,
   "console_material_bundled": false,
-  "public_setup": "Three named file steps: original HOME CXI, separate matching backup CXI, portable Azahar executable; private profile generated automatically.",
+  "public_setup": "Persistent labelled setup form with filename hints, per-row Browse controls, inline status, and optional local shell artwork",
   "status": "limited preview; gameplay and HOME switching not verified complete",
   "verification": {
-    "rust_tests_passed": 85,
+    "rust_tests_passed": 86,
     "ignored_fixture_helpers": 2,
     "release_audit_tests_passed": 3,
-    "guided_preparation": "Fresh runtime preparation, generated profile home-check, repeated setup preservation, and unchanged source/backup hashes passed.",
+    "live_ui": "New setup rows, required-file validation, inline failure retaining all selections, Cancel, and recognizable public shell inspected.",
     "game_home_crash": "unresolved"
   }
 }

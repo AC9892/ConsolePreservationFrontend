@@ -9,7 +9,7 @@ The tested backend is Azahar 2126.1.2:
 https://github.com/azahar-emu/azahar/releases/tag/2126.1.2
 Its executable and dependencies are not bundled by CPF.
 
-Open 2DS.exe. It explains and asks for these three files in order:
+Open 2DS.exe. The setup window shows the required files together, with a Browse button and filename hint for each row:
 
 1. **Original HOME Menu CXI**: your decrypted USA HOME Menu export, title
    `0004003000008F02`, from your original 6.0.0-12U preservation set. A typical
@@ -35,8 +35,7 @@ existing runtime gives an error; choose a fresh extracted runtime folder.
 These steps write to your private runtime, so close any other process using it
 first. Source and backup files must remain outside its writable user directory.
 Keep the runtime and generated profile private; never upload them to the repo.
-Public setup currently asks for the files each time. Cancelling any picker exits
-before starting emulation.
+The setup window keeps your selections visible if validation fails. Cancelling a Browse dialog keeps the current selection; Cancel closes setup before emulation starts.
 
 Right-click the device for cartridge insertion/ejection or base CIA installation.
 Save before confirming a restart. Initial cartridge support requires decrypted
@@ -45,7 +44,5 @@ excludes updates, DLC, system titles, and replacement of installed titles.
 No games or other system applications are included or automatically acquired.
 DS/DSi support is deferred.
 
-The original geometric public shell substitutes for the development artwork.
-The cross is the D-pad. A/B/X/Y are labelled; H is HOME, S is Start, T is Select,
-and P closes the session. Keyboard input follows your selected backend profile.
+The built-in public shell has a rounded dark body, blue edging, circle pad, D-pad, labelled face buttons, START/SELECT, HOME, and Power. The optional Device artwork row accepts your own RGBA 2DS PNG at 1536 × 1024 pixels. It is read locally and is never added to the public package. Leave it blank to use the built-in shell. Keyboard input follows your selected backend profile.
 Esc closes CPF. Read KNOWN_ISSUES.md, especially the unresolved game HOME crash.

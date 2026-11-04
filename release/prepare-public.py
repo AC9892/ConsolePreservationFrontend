@@ -104,7 +104,7 @@ def main():
     for source,name in [('PUBLIC_README.md','README.md'),('INSTALLATION.md','INSTALLATION.md'),('KNOWN_ISSUES.md','KNOWN_ISSUES.md'),('THIRD_PARTY_LICENSES.md','THIRD_PARTY_LICENSES.md')]:
         copy(PROJECT/'release'/source, PACKAGE/name)
     copy(PROJECT/'LICENSE',PACKAGE/'LICENSE')
-    counts = {'source_files':audit(SOURCE,True),'package_files':audit(PACKAGE),'development_bundle_used':False,'backend_bundled':False,'console_material_bundled':False,'public_setup':'manual portable preparation plus profile/backend pickers','status':'limited preview; gameplay and HOME switching not verified complete'}
+    counts = {'source_files':audit(SOURCE,True),'package_files':audit(PACKAGE),'development_bundle_used':False,'backend_bundled':False,'console_material_bundled':False,'public_setup':'Persistent labelled setup form with filename hints, per-row Browse controls, inline status, and optional local shell artwork','status':'limited preview; gameplay and HOME switching not verified complete'}
     for folder in [SOURCE,PACKAGE]: manifest(folder)
     audit(SOURCE,True); audit(PACKAGE)
     source_zip=ROOT/'CPF-2DS-public-preview-source.zip'

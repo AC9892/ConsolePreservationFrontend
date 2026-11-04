@@ -1,5 +1,8 @@
 //! Local shell artwork for the native Rust preview. No console dump is opened.
-use std::io::Cursor;
+use std::{
+    io::{Cursor, Read},
+    path::Path,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellModel {
@@ -45,9 +48,36 @@ pub struct ShellImage {
 }
 
 pub fn load_shell(model: ShellModel) -> Result<ShellImage, String> {
-    let mut decoder = png::Decoder::new(Cursor::new(model.png()));
+    #[cfg(feature = "public-release")]
+    if model == ShellModel::Original2ds {
+        if let Some(path) = std::env::var_os("CPF_2DS_SHELL") {
+            return load_shell_from_path(model, Path::new(&path));
+        }
+    }
+    decode_shell(model, model.png())
+}
+
+pub fn load_shell_from_path(model: ShellModel, path: &Path) -> Result<ShellImage, String> {
+    const MAX: u64 = 12 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|_| "Unable to read selected shell artwork")?
+        .take(MAX + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Unable to read selected shell artwork")?;
+    if bytes.len() as u64 > MAX {
+        return Err("Selected shell artwork exceeds the 12 MiB limit".into());
+    }
+    decode_shell(model, &bytes)
+}
+
+fn decode_shell(model: ShellModel, bytes: &[u8]) -> Result<ShellImage, String> {
+    let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(|error| error.to_string())?;
+    if (reader.info().width, reader.info().height) != model.source_size() {
+        return Err("Artwork dimensions must match the selected device shell".into());
+    }
     let mut raw = vec![0; reader.output_buffer_size()];
     let info = reader
         .next_frame(&mut raw)
@@ -92,6 +122,20 @@ pub fn load_shell(model: ShellModel) -> Result<ShellImage, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_artwork_requires_matching_geometry_and_preserves_source() {
+        let path = std::env::temp_dir().join(format!("cpf-shell-input-{}.png", std::process::id()));
+        let source = ShellModel::Original2ds.png();
+        std::fs::write(&path, source).unwrap();
+        let loaded = load_shell_from_path(ShellModel::Original2ds, &path).unwrap();
+        assert_eq!((loaded.width, loaded.height), (1536, 1024));
+        assert_eq!(std::fs::read(&path).unwrap(), source);
+        assert!(load_shell_from_path(ShellModel::New2dsXl, &path).is_err());
+        std::fs::write(&path, b"invalid PNG").unwrap();
+        assert!(load_shell_from_path(ShellModel::Original2ds, &path).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn supplied_shells_decode_and_have_requested_screen_fill() {

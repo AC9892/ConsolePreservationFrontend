@@ -44,37 +44,13 @@ fn launch() -> Result<(), &'static str> {
     }
 
     #[cfg(feature = "public-release")]
-    let (profile, azahar) = {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            MessageBoxW, IDOK, MB_ICONINFORMATION, MB_OKCANCEL,
+    let selection =
+        match cpf::setup_window::show().map_err(|_| "Unable to open the setup window.")? {
+            Some(selection) => selection,
+            None => return Ok(()),
         };
-        let title: Vec<u16> = "CPF 2DS — Files needed"
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
-        let body: Vec<u16> = "You will select three files:\n\n1. Your decrypted original USA HOME Menu CXI (title 0004003000008F02), from the 6.0.0-12U preservation set.\n2. A separate verified backup of that same HOME Menu CXI.\n3. azahar.exe from a separately extracted portable Azahar folder.\n\nCPF creates private writable state beside Azahar and generates the profile for you. Keep this runtime separate from your preserved files and the public upload folder. Existing settings and titles are not replaced. No NAND, keys, or game is needed for these setup steps.\n\nSee INSTALLATION.md for details. Continue?".encode_utf16().chain(Some(0)).collect();
-        if unsafe {
-            MessageBoxW(
-                std::ptr::null_mut(),
-                body.as_ptr(),
-                title.as_ptr(),
-                MB_OKCANCEL | MB_ICONINFORMATION,
-            )
-        } != IDOK
-        {
-            return Ok(());
-        }
-        let Some(home) = pick_private_file(0)? else {
-            return Ok(());
-        };
-        let Some(backup) = pick_private_file(1)? else {
-            return Ok(());
-        };
-        let Some(azahar) = pick_private_file(2)? else {
-            return Ok(());
-        };
-        cpf::public_setup::prepare(&home, &backup, &azahar)?
-    };
+    #[cfg(feature = "public-release")]
+    let (profile, azahar) = (selection.profile, selection.backend);
     #[cfg(not(feature = "public-release"))]
     let profile = match std::env::var_os("CPF_2DS_PROFILE") {
         Some(path) => PathBuf::from(path),
@@ -98,7 +74,8 @@ fn launch() -> Result<(), &'static str> {
         return Err("The original 2DS profile is unavailable. Set CPF_2DS_PROFILE to its private local path.");
     }
 
-    let mut child = Command::new(host)
+    let mut command = Command::new(host);
+    command
         .arg("home-shell")
         .arg(profile)
         .arg(azahar)
@@ -106,7 +83,15 @@ fn launch() -> Result<(), &'static str> {
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW: the shell is the only visible CPF window.
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(feature = "public-release")]
+    {
+        command.env_remove("CPF_2DS_SHELL");
+        if let Some(artwork) = selection.artwork {
+            command.env("CPF_2DS_SHELL", artwork);
+        }
+    }
+    let mut child = command
         .spawn()
         .map_err(|_| "Unable to start the 2DS runtime.")?;
     let _job = cpf::process_lifecycle::ProcessJob::attach(&mut child)
@@ -128,54 +113,4 @@ fn launch() -> Result<(), &'static str> {
         return Err("The 2DS session ended with an error. Check the private runtime log.");
     }
     Ok(())
-}
-
-#[cfg(all(windows, feature = "public-release"))]
-fn pick_private_file(step: u8) -> Result<Option<std::path::PathBuf>, &'static str> {
-    use std::{
-        mem::{size_of, zeroed},
-        os::windows::ffi::OsStringExt,
-    };
-    use windows_sys::Win32::UI::Controls::Dialogs::*;
-    let title: Vec<u16> = match step {
-        0 => "1 of 3 — Select original USA HOME Menu 0004003000008F02 CXI",
-        1 => "2 of 3 — Select the separate matching HOME Menu backup CXI",
-        _ => "3 of 3 — Select azahar.exe in your separate private runtime folder",
-    }
-    .encode_utf16()
-    .chain(Some(0))
-    .collect();
-    let filter: Vec<u16> = if step == 2 {
-        "Portable backend (*.exe)\0*.exe\0\0"
-    } else {
-        "Decrypted original USA HOME Menu (*.cxi)\0*.cxi\0\0"
-    }
-    .encode_utf16()
-    .collect();
-    let mut path = vec![0u16; 32768];
-    unsafe {
-        let mut dialog: OPENFILENAMEW = zeroed();
-        dialog.lStructSize = size_of::<OPENFILENAMEW>() as u32;
-        dialog.lpstrTitle = title.as_ptr();
-        dialog.lpstrFilter = filter.as_ptr();
-        dialog.lpstrFile = path.as_mut_ptr();
-        dialog.nMaxFile = path.len() as u32;
-        dialog.Flags = OFN_EXPLORER
-            | OFN_FILEMUSTEXIST
-            | OFN_PATHMUSTEXIST
-            | OFN_NOCHANGEDIR
-            | OFN_DONTADDTORECENT;
-        if GetOpenFileNameW(&mut dialog) == 0 {
-            return if CommDlgExtendedError() == 0 {
-                Ok(None)
-            } else {
-                Err("Unable to open setup file picker.")
-            };
-        }
-    }
-    let end = path
-        .iter()
-        .position(|c| *c == 0)
-        .ok_or("Selected path is invalid.")?;
-    Ok(Some(std::ffi::OsString::from_wide(&path[..end]).into()))
 }
