@@ -1,42 +1,23 @@
-# ConsolePreservationFrontend (CPF)
+# CPF 2DS public preview
 
-CPF is a proposed frontend for preserving and reconstructing console environments. This repository currently contains design documentation only. It does not contain a working application, preservation backend, or portable package format.
+**[Download the complete Windows package](downloads/CPF-2DS-public-preview-windows.zip?raw=1)**
 
-## Purpose
+The executable is **[2DS.exe](2DS.exe?raw=1)**, directly in this branch. Keep
+[cpf.exe](cpf.exe?raw=1) and [cpf-preview.exe](cpf-preview.exe?raw=1) beside it.
+Downloading the complete Windows ZIP is the easiest way to get all required CPF
+files and license notices together.
 
-Give users a way to inspect, organize, and eventually reconstruct the recorded state of a console environment, including context beyond a single game executable.
+[Setup instructions](INSTALLATION.md) · [Known issues](KNOWN_ISSUES.md) ·
+[Complete matching source with vendored dependencies](downloads/CPF-2DS-public-preview-source.zip?raw=1) ·
+[Download checksums](downloads/SHA256SUMS.txt)
 
-## Core concept
 
-The frontend would present records for console storage, firmware information, hardware profiles, configuration, metadata, saves, snapshots, and other reconstructable state. It should distinguish captured data, descriptive metadata, and references to material the user must supply separately.
+Experimental Windows frontend for user-supplied original USA 2DS materials declared as 6.0.0-12U. This is a limited preview, not a complete firmware emulator or a verified playable release.
 
-## Example use cases
+This package contains CPF only. It contains no Nintendo firmware, NAND, keys, games, console identity, private profiles, saves, logs, Azahar executable, or development artwork. Supply your own separate portable backend and original HOME Menu materials. Read INSTALLATION.md and KNOWN_ISSUES.md before use.
 
-- Review an archived console configuration and save history.
-- Compare a preserved hardware or firmware profile with a target environment.
-- Prepare a preservation package for import by a compatible tool.
+Start 2DS.exe. Guided setup identifies the original HOME Menu CXI, its separate matching backup CXI, and azahar.exe. CPF generates the private profile and prepares a fresh runtime for you. Cancelling a picker exits. cpf-preview.exe opens the original geometric public shell without console data. cpf.exe exposes developer commands; run it without arguments for usage.
 
-These are proposed workflows, not implemented features.
+Source: a Windows Rust MSVC toolchain and Windows SDK/resource compiler are required. Build with `cargo build --release --offline --features public-release --bins` after extracting the accompanying source archive. Dependencies and their license files are included under vendor. The release scripts additionally use Python 3.11 or newer and produce separate source and binary candidates, remapped build paths, a statically linked CRT, checksums, and an audit report. Keep development and user runtime directories private.
 
-## High-level architecture
-
-CPF would be a user interface above a separate preservation data layer. The data layer would define manifests, provenance, integrity checks, and import/export behavior; CPF would display and validate those records and guide compatible restore workflows. Optional adapters could connect preservation records to existing emulators. A portable container format may be specified later; no container schema or extension is established by this repository.
-
-## Current status
-
-**Experimental design.** This repository contains a README, not frontend code. Capture, import, export, package validation, and reconstruction are not available here.
-
-## Planned features
-
-- Inspectable manifests for hardware, firmware information, configuration, and storage.
-- Save and snapshot browsing with provenance and integrity information.
-- Import/export and package validation interfaces.
-- Compatibility checks for optional emulator adapters.
-- Clear reporting of missing user-supplied materials during reconstruction.
-
-## Relationship to the other frameworks
-
-CPF concerns console preservation workflows. [GameBridge](https://github.com/AC9892/GameBridge-Framework) concerns game-to-game translation, [VME/VMBridge](https://github.com/AC9892/VM-EmbedingFramework) concerns embedded virtual machines, and EmuFrame concerns emulator integration. Any connection would be optional and use explicit adapters or documented interfaces.
-
-CPF must not include copyrighted firmware, games, keys, or other proprietary content. Users must supply any required material through lawful channels supported by the relevant tools.
-
+CPF code and original public geometry: GPL-3.0-only, matching the DSi CPF release track. See LICENSE. No Nintendo affiliation is implied.

@@ -1,0 +1,2 @@
+a5f504264f8dcedffb36c019329cf5d28098d08ea51b05bfe4c29945c1100dd2  CPF-2DS-public-preview-source.zip
+4d11760ea9ffe1b8764200236240a930d193c02b779ce6bdb0ad2851c43a9415  CPF-2DS-public-preview-windows.zip
