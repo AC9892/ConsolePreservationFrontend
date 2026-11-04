@@ -10,9 +10,15 @@
 #include "xenia/kernel/xam/xam_module.h"
 
 #include "xenia/base/math.h"
+#include "xenia/base/cvar.h"
+#include "third_party/stb/stb_image.h"
 #include "xenia/emulator.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/xam/xam_private.h"
+
+DEFINE_path(dashboard_default_system_image, "",
+            "Optional local original dashboard defaultsystemimage.png. "
+            "Restart the emulator after changing this path.", "Kernel");
 
 namespace xe {
 namespace kernel {
@@ -61,7 +67,61 @@ void XamModule::RegisterExportTable(xe::cpu::ExportResolver* export_resolver) {
   export_resolver->RegisterTable("xam.xex", &get_xam_exports());
 }
 
-XamModule::~XamModule() {}
+XamModule::~XamModule() {
+  if (default_image_address_) {
+    memory_->SystemHeapFree(default_image_address_);
+  }
+}
+
+bool XamModule::GetDefaultSystemImage(uint32_t* address, uint32_t* size) {
+  std::lock_guard<std::mutex> lock(default_image_mutex_);
+  if (!default_image_address_) {
+    if (cvars::dashboard_default_system_image.empty()) {
+      return false;
+    }
+    FILE* file = xe::filesystem::OpenFile(
+        cvars::dashboard_default_system_image, "rb");
+    if (!file) {
+      return false;
+    }
+    // Bound allocation and decoder input before reading user-supplied bytes.
+    constexpr size_t kMaximumImageSize = 1024 * 1024;
+    std::vector<uint8_t> bytes(kMaximumImageSize + 1);
+    const size_t length = fread(bytes.data(), 1, bytes.size(), file);
+    const bool read_failed = ferror(file) != 0;
+    fclose(file);
+    if (read_failed || length < 24 || length > kMaximumImageSize) {
+      return false;
+    }
+    const uint8_t signature[] = {137, 80, 78, 71, 13, 10, 26, 10};
+    if (memcmp(bytes.data(), signature, sizeof(signature)) != 0) {
+      return false;
+    }
+    int width = 0, height = 0, channels = 0;
+    if (!stbi_info_from_memory(bytes.data(), static_cast<int>(length), &width,
+                               &height, &channels) ||
+        width != 64 || height != 64) {
+      return false;
+    }
+    auto* decoded = stbi_load_from_memory(bytes.data(), static_cast<int>(length),
+                                         &width, &height, &channels, 4);
+    if (!decoded) {
+      return false;
+    }
+    stbi_image_free(decoded);
+    const uint32_t allocation =
+        memory_->SystemHeapAlloc(static_cast<uint32_t>(length));
+    if (!allocation) {
+      return false;
+    }
+    memcpy(memory_->TranslateVirtual<uint8_t*>(allocation), bytes.data(), length);
+    default_image_address_ = allocation;
+    default_image_size_ = static_cast<uint32_t>(length);
+  }
+  *address = default_image_address_;
+  *size = default_image_size_;
+  return true;
+}
 
 void XamModule::LoadLoaderData() {
   const auto path = emulator_->storage_root() / kXamModuleLoaderDataFileName;

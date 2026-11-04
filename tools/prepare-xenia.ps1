@@ -7,11 +7,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $revision = '2372a54105d9d598ab5bc7ba94a72ef1bea4b271'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$patchPath = Join-Path $projectRoot 'patches\cpf-dashboard.patch'
+$patchPaths = @('cpf-dashboard.patch', 'cpf-gamer-tile.patch', 'cpf-default-system-image.patch') | ForEach-Object { Join-Path $projectRoot ('patches\' + $_) }
 $sourcePath = [System.IO.Path]::GetFullPath($SourceDirectory)
 
-if (-not (Test-Path -LiteralPath $patchPath -PathType Leaf)) {
-    throw 'The canonical CPF dashboard patch is missing.'
+foreach ($patch in $patchPaths) {
+    if (-not (Test-Path -LiteralPath $patch -PathType Leaf)) { throw "Missing patch: $patch" }
 }
 if (-not (Test-Path -LiteralPath $sourcePath)) {
     if ($CheckOnly) { throw 'CheckOnly requires an existing source checkout.' }
@@ -28,21 +28,7 @@ if ($LASTEXITCODE -ne 0 -or $actualRevision.Trim() -ne $revision) {
     throw 'The selected checkout is not at the pinned upstream revision. Nothing was reset or overwritten.'
 }
 
-& git -C $sourcePath apply --check $patchPath 2>$null
-if ($LASTEXITCODE -eq 0) {
-    if ($CheckOnly) {
-        Write-Output 'Patch check passed. The source checkout was not modified.'
-        return
-    }
-    & git -C $sourcePath apply $patchPath
-    if ($LASTEXITCODE -ne 0) { throw 'Patch application failed.' }
-    Write-Output 'CPF dashboard patch applied. Follow the README build instructions.'
-    return
-}
-
-& git -C $sourcePath apply --reverse --check $patchPath 2>$null
-if ($LASTEXITCODE -eq 0) {
-    Write-Output 'All CPF patch hunks are already present. No files were changed.'
-    return
-}
-throw 'The patch does not apply cleanly and is not fully present. No files were changed; inspect local changes before proceeding.'
+$arguments = @((Join-Path $PSScriptRoot 'prepare_xenia.py'), $sourcePath) + $patchPaths
+if ($CheckOnly) { $arguments += '--check' }
+& python @arguments
+if ($LASTEXITCODE -ne 0) { throw 'Public source preparation failed. See the error above; no reset was performed.' }

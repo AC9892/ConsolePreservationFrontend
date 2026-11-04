@@ -6,6 +6,12 @@ https://github.com/user-attachments/assets/5b367fa9-cada-45bc-a720-1e2fb7f3cf26
 
 This branch contains the existing optional CPF Windows monitor, browsable Xenia modifications, synthetic tests and a reproducible upstream patch. It contains no dashboard binaries/assets, firmware, games, profiles, keys, private logs or compiled executables. Supply your own lawful local research inputs separately.
 
+## Public preview preparation
+
+See [PUBLIC-PREVIEW.md](PUBLIC-PREVIEW.md) for the build and user-file setup path. The preparation script now validates and applies all three published patches, recognizes fully prepared source, and refuses conflicting source without resetting it. The new packaging tool stages an explicit executable/documentation/configuration allowlist and a hash manifest. It never copies a development runtime folder.
+
+A clean public-source build is being validated. A downloadable public binary is not yet certified or released; local dashboard success does not substitute for that check.
+
 ## Gamer-picture checkpoint (2026-10-30)
 
 The additive [gamer-tile patch](patches/cpf-gamer-tile.patch) corrects RGBA-to-ARGB row placement for padded texture pitch, rejects undersized destinations and handles image decoder failure. Apply it after `cpf-dashboard.patch` to the pinned upstream checkout. This is a source checkpoint, not a release.
@@ -27,7 +33,7 @@ The candidate built with `/Z7` and booted original Metro17559 in isolated storag
 | Path | Contents |
 | --- | --- |
 | [monitor](monitor) | Existing Rust monitor/preservation module, Cargo files and synthetic tests. |
-| [xenia](xenia) | 23 complete changed/new source views and two explicitly marked helper-only views. |
+| [xenia](xenia) | 25 complete changed/new source views and two explicitly marked helper-only views. |
 | [patches/cpf-dashboard.patch](patches/cpf-dashboard.patch) | Canonical changes to 25 files in the pinned upstream tree. |
 | [tools/prepare-xenia.ps1](tools/prepare-xenia.ps1) | Prepare/check a separate pinned upstream checkout. |
 | [xenia/source-manifest.json](xenia/source-manifest.json) | Source-view hashes, upstream paths and patch identity. |
@@ -73,8 +79,10 @@ git clone https://github.com/xenia-canary/xenia-canary.git xenia-cpf
 cd xenia-cpf
 git checkout 2372a54105d9d598ab5bc7ba94a72ef1bea4b271
 git submodule update --init --recursive
-git apply --check <path-to-cpf-dashboard.patch>
+# Or use tools/prepare-xenia.ps1 from the CPF branch to apply all three patches.
 git apply <path-to-cpf-dashboard.patch>
+git apply <path-to-cpf-gamer-tile.patch>
+git apply <path-to-cpf-default-system-image.patch>
 $env:_CL_ = '/Z7'
 python xenia-build.py build --config=release --build-tests --target xenia-kernel-tests --target xenia-app
 .\build\bin\Windows\Release\xenia-kernel-tests.exe

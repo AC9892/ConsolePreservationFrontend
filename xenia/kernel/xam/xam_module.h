@@ -11,6 +11,7 @@
 #define XENIA_KERNEL_XAM_XAM_MODULE_H_
 
 #include <string>
+#include <mutex>
 
 #include "xenia/cpu/export_resolver.h"
 #include "xenia/kernel/kernel_module.h"
@@ -41,6 +42,7 @@ class XamModule : public KernelModule {
 
   void LoadLoaderData();
   bool SaveLoaderData();
+  bool GetDefaultSystemImage(uint32_t* address, uint32_t* size);
 
   void SetLaunchCallback(uint32_t callback) { callback_ = callback; }
 
@@ -50,6 +52,9 @@ class XamModule : public KernelModule {
  private:
   uint32_t callback_ = 0;
   LoaderData loader_data_;
+  std::mutex default_image_mutex_;
+  uint32_t default_image_address_ = 0;
+  uint32_t default_image_size_ = 0;
 };
 
 }  // namespace xam

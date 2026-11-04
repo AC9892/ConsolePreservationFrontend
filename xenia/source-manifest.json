@@ -104,19 +104,19 @@
       "upstream_path": "src/xenia/kernel/xam/xam_info.cc",
       "source_view": "kernel/xam/xam_info.cc",
       "view_kind": "complete modified file",
-      "sha256": "55304a047d50a544c63aec3eb9a11b33790ca976ed0b013eb6fe3c81a70c7e70"
+      "sha256": "85e26eee898c5be02e4618ec3a308be9a51c9c9f0e38efa2a5a876f9410316d3"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_module.cc",
       "source_view": "kernel/xam/xam_module.cc",
       "view_kind": "complete modified file",
-      "sha256": "bd37808dc205f2490b5d95614d77d8c6dcd2e861cd18b58f595f3f5690ce3135"
+      "sha256": "127e58557fd8a90f419af3b645577f3c336e3a8a9a66daca676746783232efb1"
     },
     {
       "upstream_path": "src/xenia/kernel/xam/xam_module.h",
       "source_view": "kernel/xam/xam_module.h",
       "view_kind": "complete modified file",
-      "sha256": "5883a8867d7c39855012e59e684f19a81f53e83abc2e5ebb4a854521fcd54b99"
+      "sha256": "0d2de839577f9d0272c465b79b4daccceab17ed8d95739efa0e58a26103198e7"
     },
     {
       "upstream_path": "src/xenia/kernel/xboxkrnl/xboxkrnl_crypt.cc",
@@ -153,6 +153,29 @@
       "source_view": "vfs/devices/disc_image_device.h",
       "view_kind": "complete modified file",
       "sha256": "28a64c3b7dd01c6887e8f8b8a65010fac685d46fa76c4ac2eb89b4f31595cb8f"
+    },
+    {
+      "upstream_path": "src/xenia/kernel/xam/tile_texture.h",
+      "source_view": "kernel/xam/tile_texture.h",
+      "view_kind": "complete new file",
+      "sha256": "c31e1b592cf66a0506835d03c43bd2f4da1b5498a98aad087e3ae44979cf2248"
+    },
+    {
+      "upstream_path": "src/xenia/kernel/testing/tile_texture_test.cc",
+      "source_view": "kernel/testing/tile_texture_test.cc",
+      "view_kind": "complete new file",
+      "sha256": "acdd200b1b33f6847beff875a030a779ca2b9b6c1ff3b0b24b90ed7c460b15bd"
     }
-  ]
+  ],
+  "additive_patches": [
+    {
+      "path": "../patches/cpf-gamer-tile.patch",
+      "sha256": "a17dcc6d53957a16cf8b81e6d2d6933228bcdedef91814f17537177eb025eb8d"
+    },
+    {
+      "path": "../patches/cpf-default-system-image.patch",
+      "sha256": "c9dc2554f3168c3365c0dcba08e778b5125b622eb5313b3f75ec25cf24c4b451"
+    }
+  ],
+  "source_view_scope": "Browsable source views; ordered canonical and additive patches define the full build."
 }

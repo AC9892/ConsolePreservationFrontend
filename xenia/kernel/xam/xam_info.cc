@@ -58,6 +58,27 @@ namespace xe {
 namespace kernel {
 namespace xam {
 
+// The original dashboard receives a borrowed, XAM-owned PNG pointer. It must
+// not free it. The optional source path is empty unless explicitly configured.
+dword_result_t XamGetDefaultSystemImage_entry(lpdword_t image_ptr,
+                                               lpdword_t size_ptr) {
+  if (!image_ptr) {
+    return X_E_INVALIDARG;
+  }
+  uint32_t address = 0, size = 0;
+  auto xam = kernel_state()->GetKernelModule<XamModule>("xam.xex");
+  if (kernel_state()->title_id() != kDashboardID ||
+      (!xam || !xam->GetDefaultSystemImage(&address, &size))) {
+    return 0x8000FFFF;  // Original uninitialized image-cache result.
+  }
+  *image_ptr = address;
+  if (size_ptr) {
+    *size_ptr = size;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamGetDefaultSystemImage, kUserProfiles, kSketchy);
+
 // https://github.com/tpn/winsdk-10/blob/master/Include/10.0.14393.0/km/wdm.h#L15539
 typedef enum _MODE { KernelMode, UserMode, MaximumMode } MODE;
 

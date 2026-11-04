@@ -9,3 +9,6 @@
 **/*.dmp
 **/launch_data.bin
 **/xbox360-library.json
+
+**/__pycache__/
+/preview/
