@@ -1,7 +1,7 @@
 # Source provenance
 
 The checked-in Rust files match the source used for this public candidate.
-The complete source archive additionally contains vendored locked dependencies.
+The matching source archive, distributed through GitHub Releases, additionally contains vendored locked dependencies.
 The Windows executables were built with the public-release feature, stripped
 symbols, remapped build paths, and a statically linked MSVC CRT.
 Original geometric assets replace development images. Azahar and private console

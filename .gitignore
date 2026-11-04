@@ -41,3 +41,9 @@
 overlays/
 reports/private/
 release-staging/
+
+# Executable builds and packaged downloads belong only in GitHub Releases.
+*.exe
+*.dll
+*.zip
+*.7z
