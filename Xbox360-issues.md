@@ -1,8 +1,8 @@
 # Xbox 360 dashboard issues and next work
 
-Updated: 2026-10-30. Scope: authentic Metro dashboard **2.0.17559.0** running in the CPF-modified Xenia Canary backend.
+Updated: 2026-11-04. Scope: authentic Metro dashboard **2.0.17559.0** running in the CPF-modified Xenia Canary backend.
 
-Source: [Xbox360 branch](https://github.com/AC9892/ConsolePreservationFrontend/tree/Xbox360), published checkpoint [`539423b`](https://github.com/AC9892/ConsolePreservationFrontend/commit/539423b5352f2f94a7a2f1a1d0d4f8fccc8836dd). The source-only gamer-tile and default-image API experiments are published as additive patches. Earlier local Game Details diagnostics are not automatically included. No release accompanies this report.
+Source: [Xbox360 branch](https://github.com/AC9892/ConsolePreservationFrontend/tree/Xbox360), published checkpoint [`a108c91`](https://github.com/AC9892/ConsolePreservationFrontend/commit/a108c91504714630b36d70c8c39d29bff12756df). The source-only gamer-tile and default-image API experiments are published as additive patches. Earlier local Game Details diagnostics are not automatically included. No release accompanies this report.
 
 Status: **Local runtime confirmed** = directly observed in the development candidate; **User reported** = manual observation needing a current regression test; **Open verification** = not demonstrated; **Incomplete implementation** = missing implementation or lifecycle contract. A queued request, successful build or mounted image does not prove a working page or gameplay.
 
@@ -43,6 +43,18 @@ Authentic dashboard functionality
 | X360-PROFILE-01 | **Partial / open verification** | Existing test profile loads; creation and selection have worked partially. Reliable settings/sign-in persistence across repeated launches is not fully established. | Reuse the existing profile; test selection, local sign-in/out, persistence and normal shutdown without creating unnecessary profiles. |
 | X360-LIBRARY-01 | **Partial / open verification** | My Games opens empty; My Apps shows six original entries. Recents opens, but history accuracy is unverified. A mounted disc is not automatically a library installation. | Test enumeration and supported original app launch/return separately. Verify Recents against actual supported launches. |
 | X360-REGRESSION-01 | **Open verification** | Most system apps, nested settings, additional themes, other games and long-session stability lack complete validation. | Maintain a per-feature pass/fail/untested matrix. Publish claims only for the exact tested build. |
+
+## Public preview validation (2026-11-04)
+
+A clean build from the pinned upstream revision and the three published CPF patches passed 10 kernel test cases / 296 assertions. A disposable copy of the staged preview created a new local profile, booted original Metro17559, rendered Home/Social, accepted shoulder navigation, exited normally and retained that profile across one restart. Test dashboard files were supplied separately; none were packaged. This is limited local verification, not full system compatibility.
+
+| ID | Status | Evidence / next work |
+| --- | --- | --- |
+| X360-PUBLIC-01 | **Local preview working; no GitHub binary release** | Unpacked preview and ZIP were staged and checked against an explicit file/hash manifest. They exclude dashboard files, profiles, logs and debug symbols. Public source includes preparation/packaging tools and setup instructions. Broader machine/GPU and controller testing remains open. |
+| X360-PUBLIC-INPUT-01 | **Template corrected and locally retested** | Upstream keyboard emulation defaulted to disabled. Public config now sets keyboard_mode=1; shoulder navigation then worked. Physical controllers and long-session input remain untested in this batch. |
+| X360-PUBLIC-SETUP-01 | **Preparation safeguards tested** | All three patches apply in order; repeat preparation recognizes the completed state. Dry-run leaves source unchanged; conflicts are preserved; packaging refuses unreviewed source files. Preview still requires user-supplied dashboard filesystem and a local profile. |
+
+Existing avatar, Game Details, Preferences, online-service and seamless-switching limitations remain. One profile restart test does not establish complete profile/save compatibility. Existing working Metro and original dumps were preserved.
 
 ## Current picture and avatar checkpoint (2026-10-30)
 
